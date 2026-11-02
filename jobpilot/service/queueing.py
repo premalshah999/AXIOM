@@ -706,7 +706,7 @@ class QueueingMixin:
                     "engine_version": engine_version(),
                     # Take over's rebuilding run: the engine keeps its tab open for the owner whatever the result.
                     **({"steer": True} if mode == "dry_run" and steer_opening(s, job.id) else {}),
-                    **({"owner_hands": True} if mode == "submit" and steer_hands(s, job.id) else {}),
+                    **({"owner_hands": handed} if mode == "submit" and (handed := steer_hands(s, job.id)) else {}),
                     "model_version": self.config.llm_provider + ":" + self.config.llm_model,
                     "runner_tier": job_tier(self.db, job.id),
                     "profile_version": profile_version(packet_profile),

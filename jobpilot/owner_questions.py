@@ -221,6 +221,7 @@ def reusable_answer(kb, question, options=(), context=None, reason="", employer=
         or context.get("source") == "repair"
         or context.get("type") in {"checkbox", "password"}
         or generic(question)
+        or unread(question, reason)  # Nobody read this form's question, so nothing says it is the one the saved answer was for.
     ):
         return None
     listed = [text for _, text in choices(options)]
@@ -558,6 +559,34 @@ def allows_several(question, context):
     return (context or {}).get("type") in {"checkboxgroup", "select-multiple"} or bool(MULTI_SELECT.search(question or ""))
 
 
+def takes_several(question, options=(), context=None):
+    """allows_several, for a question with its choices: "Do you speak multiple languages?" with Yes and No takes one answer. Ticked as a
+    list it offered both, and the form takes neither together."""
+    context = context or {}
+    if context.get("type") not in {"checkboxgroup", "select-multiple"} and sorted(normalize(t) for _, t in choices(options)) == ["no", "yes"]:
+        return False
+    return allows_several(question, context)
+
+
+def fits_form(answer, question, options=(), context=None):
+    """Whether this form can take the answer: one of its choices, several when it takes several (one per line, as a checkbox group is
+    filled), or anything for a list that takes typed text. A multi-pick from the app was refused as "Choose one of the offered answers"."""
+    context = context or {}
+    shown = tick_options(options, context)
+    offered = [text for _, text in choices(shown)]
+    if answer in offered or answer in shown or free_text_allowed(options, context):
+        return True
+    if takes_several(question, shown, context):
+        picks = [line.strip() for line in str(answer).splitlines() if line.strip()]
+        return bool(picks) and all(pick in offered or pick in shown for pick in picks)
+    return False
+
+
+def same_question(question, options, context):
+    """What makes two rows the one question: the complete wording a person reads, and the same choices in any order."""
+    return normalize(display(question, context)), frozenset(normalize(t) for _, t in choices(tick_options(options, context)))
+
+
 # What no answer can supply: a recording of the applicant, or a piece of work the applicant has not written. Appian,
 # Edmentum and Fab2 (2026-10-31) asked for a writing sample, a publication or a portfolio; Aurelian, Flexcompute and
 # Solace Health for a video. They read like any other question, so the owner was shown an answer box for each.
@@ -597,6 +626,13 @@ def cannot_automate(question, options=(), context=None, reason=""):
     return "", False
 
 
+def employer_only(question, options=()):
+    """True when the answer belongs to one employer: the rule answers are saved under (knowledge.learned_answer), employer-free."""
+    from .knowledge import EMPLOYER_SPECIFIC, NARRATIVE
+
+    return bool(EMPLOYER_SPECIFIC.search(tidy(question))) or (not choices(options) and bool(NARRATIVE.search(tidy(question))))
+
+
 def present(review):
     """The owner-facing form of a review row (a dict from db.record) for the web app.
 
@@ -616,7 +652,9 @@ def present(review):
         "requirement": requirement(review.get("question", ""), options, context, review.get("reason", "")),
         "why": owner_reason(review.get("reason", ""), question_kind),
         "allow_other": question_kind == "choice" and free_text_allowed(options, context),
-        "multiple": question_kind == "choice" and allows_several(review.get("question", ""), context),
+        "multiple": question_kind == "choice" and takes_several(review.get("question", ""), options, context),
+        # A question tied to the employer ("Why this role?") is never one answer for two employers, however it is worded.
+        "employer_only": employer_only(review.get("question", ""), options),
         "accept": context.get("accept", "") if question_kind == "upload" else "",
         "reason": owner_reason(review.get("reason", ""), question_kind),
     }

@@ -1,13 +1,20 @@
 """Request security (sign-in, Origin and content-type rules, response headers) and the error mapping."""
 
+import logging
 from urllib.parse import urlsplit
 
 from fastapi import Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
+from starlette.exceptions import HTTPException
 
 from ..owner_account import PUBLIC_PATHS
+from ..vocabulary import PROBLEM, plain_error, plain_validation
 from .sessions import COOKIE, RENEW_AFTER, same_secret
+
+logger = logging.getLogger(__name__)
 
 
 LOOPBACK = {"127.0.0.1", "localhost", "::1", "testserver"}
@@ -88,10 +95,33 @@ def install(app, config, sessions, cache):
             response.headers["Cache-Control"] = "no-store"
         return response
 
+    # What a refusal says goes on a screen as it stands, so these are the one door every error leaves by. A validator's report is a
+    # ValueError too, with its link ("For further information visit https://errors.pydantic.dev/..."), and any library's message
+    # could be next: a sentence the app wrote stands, anything else becomes a plain one.
+    @app.exception_handler(ValidationError)
+    async def invalid_data(_, exc):
+        return JSONResponse({"detail": plain_validation(exc.errors(include_input=False, include_context=False))}, status_code=400)
+
+    @app.exception_handler(RequestValidationError)
+    async def invalid_request(_, exc):
+        return JSONResponse({"detail": plain_validation(exc.errors())}, status_code=422)
+
+    @app.exception_handler(HTTPException)
+    async def refused(_, exc):
+        # Routes hand on str(exc) as the refusal, a validator's report among them.
+        detail = plain_error(exc.detail) if isinstance(exc.detail, str) else exc.detail
+        return JSONResponse({"detail": detail}, status_code=exc.status_code, headers=exc.headers)
+
     @app.exception_handler(ValueError)
     async def invalid(_, exc):
-        return JSONResponse({"detail": str(exc)[:1000]}, status_code=400)
+        return JSONResponse({"detail": plain_error(str(exc)[:1000])}, status_code=400)
 
     @app.exception_handler(RuntimeError)
     async def runtime_error(_, exc):
-        return JSONResponse({"detail": str(exc)[:500]}, status_code=409)
+        return JSONResponse({"detail": plain_error(str(exc)[:500])}, status_code=409)
+
+    @app.exception_handler(Exception)
+    async def unexpected(_, exc):
+        # Whatever nothing else caught: the log keeps it, the screen says something a person can use.
+        logger.exception("Unhandled error in a request", exc_info=exc)
+        return JSONResponse({"detail": PROBLEM}, status_code=500)

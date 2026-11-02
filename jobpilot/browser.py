@@ -1636,8 +1636,14 @@ class BrowserEngine:
                 resume_artifact_id=run["packet"].get("resume_artifact_id"),
             )
             self.form = FormSession(page, resolver, resume, self.emit)
-            if run["packet"].get("owner_hands"):
-                self.form.owner_hands = True  # Take over's hand-back: the page's values are the owner's (forms.adopt_owner_values)
+            if handed := run["packet"].get("owner_hands"):
+                # Take over's hand-back: the page's values are the owner's (forms.adopt_owner_values), on the page they looked at only.
+                from .steer import owner_saw
+
+                if owner_saw(handed, resumed, pending.get("target_id") if external else "", page.url):
+                    self.form.owner_hands = True
+                else:
+                    self.emit("owner_values", "This isn't the page you handed back, so every answer on it is checked as usual")
             self.form.on_checkpoint = self.checkpoint_draft
             self.form.network = NetworkMonitor(page)
             self.form.on_popup = self.prepare_popup

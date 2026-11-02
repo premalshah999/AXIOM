@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from ...db import Event, Job, Run, Setting, record
+from ...vocabulary import activity, plain_report
 
 
 class AnswerInput(BaseModel):
@@ -86,8 +87,23 @@ def router(service) -> APIRouter:
             "answers": ledger,
             "screenshot": (folder / "final.png").exists(),
             "demo_receipt": demo_receipt,
-            "failure_report": db.get_setting("failure_report:" + run_id),
+            "failure_report": plain_report(db.get_setting("failure_report:" + run_id), found.reason),
+            "activity": activity(events),
         }
+
+    @r.get("/api/runs/{run_id}/record")
+    def run_record(run_id: str):
+        """Everything kept about one attempt, as a file to send when reporting a problem: the engine's own words stay out of the screens."""
+        from fastapi.responses import Response
+
+        with db.session() as s:
+            run = s.get(Run, run_id)
+            if not run:
+                raise HTTPException(404)
+            found = {k: v for k, v in record(run).items() if k != "packet"}
+            events = [record(x) for x in s.scalars(select(Event).where(Event.run_id == run_id).order_by(Event.id))]
+        body = json.dumps({"run": found, "events": events, "failure_report": db.get_setting("failure_report:" + run_id)}, indent=1, default=str)
+        return Response(body, media_type="application/json", headers={"Content-Disposition": f'attachment; filename="axiom-attempt-{run_id[:8]}.json"'})
 
     @r.get("/api/runs/{run_id}/screenshot")
     def screenshot(run_id: str):
