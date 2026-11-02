@@ -71,7 +71,7 @@ class FlowHandleMixin:
         account_url = frame.url
         if IDENTITY_PROVIDER.search(urlsplit(account_url).hostname or ""):
             # The owner's rule: no application is made with these logins (social_login_only). The model pressed "Sign in using LinkedIn" on a
-            # Microsoft posting (2026-11-02) and the saved password was then typed into LinkedIn's own login, three runs in a row.
+            # Microsoft posting (2026-11-02) and the saved password was then typed into LinkedIn's own login, three times over two runs.
             e.result = {
                 "state": "waiting_browser",
                 "reason": "The page led to a third-party login, and no password is typed there; nothing was sent",
