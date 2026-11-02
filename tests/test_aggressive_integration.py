@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 
 import pytest
+from pypdf import PdfReader
 
 from jobpilot.db import Job
 from jobpilot.features.resumes import choice, pipeline
@@ -12,6 +13,7 @@ from jobpilot.features.resumes.aggressive.integration import refresh
 from jobpilot.features.resumes.aggressive.schema import Choice, Confirmation
 from jobpilot.features.resumes.compiler import compile_pdf
 from jobpilot.features.resumes.tables import RsArtifact
+from jobpilot.features.resumes.validate import squash
 from test_aggressive_pipeline import ORIGINALS, add_job, needs_tex, proposals, stub
 
 
@@ -76,6 +78,16 @@ def test_originals_only_and_explicit_replacement_pass_shared_rules(service):
     assert originals["rules"]["ok"] and originals["drafts"] == []
     assert "Public Report Review" in originals["doc"]["sections"][2]["entries"][0]["heading"]
     assert all(p.title not in str(originals["doc"]) for p in proposals())
+    # "Use only my original projects" restores everything, on the document and in the file a recruiter gets.
+    assert originals["removed_projects"] == []
+    assert [e["id"] for e in originals["doc"]["sections"][2]["entries"] if e["include"]] == list(ORIGINALS)
+    with service.db.session() as s:
+        restored = s.get(RsArtifact, originals["artifact"]["id"])
+    page = PdfReader(service.config.data_dir / restored.pdf_path).pages
+    assert len(page) == 1
+    printed = squash(page[0].extract_text())
+    for _, texts in ORIGINALS.values():
+        assert all(squash(t) in printed for t in texts)
     for d in ws["drafts"]:
         ws = store.confirm(
             service.db, ws["id"], d["id"], Confirmation(approved=True, revision=ws["revision"])
@@ -101,6 +113,38 @@ def test_originals_only_and_explicit_replacement_pass_shared_rules(service):
     )
     assert result.status == "ready", result
     assert result.artifact.validation["removed_projects"] == list(ORIGINALS)
+
+
+@needs_tex
+def test_review_edits_with_drafts_in_place_keep_the_rule_for_real_bullets(client, service):
+    _, ws, _ = pending(service)
+    view = client.get("/api/v2/resumes/tailor/job/ag-job").json()
+    assert view["removed_projects"] == list(ORIGINALS)
+    doc = view["doc"]
+    real = doc["sections"][0]["entries"][0]["bullets"][0]
+    shorter = real["text"].replace("every adjustment", "each adjustment")
+    edited = client.post(
+        "/api/v2/resumes/tailor/job/ag-job/save", json={"doc": {**doc}, "removed_projects": view["removed_projects"]}
+    )
+    assert edited.status_code == 200, edited.text
+    real["text"] = shorter
+    edited = client.post("/api/v2/resumes/tailor/job/ag-job/save", json={"doc": doc, "removed_projects": view["removed_projects"]})
+    assert edited.status_code == 200, edited.text
+    assert edited.json()["removed_projects"] == list(ORIGINALS)
+    assert shorter in str(edited.json()["doc"]) and proposals()[0].title in str(edited.json()["doc"])
+    # One character past the source, or one bullet fewer, is refused by the shared rules, drafts or no drafts.
+    source = view["source_doc"]["sections"][0]["entries"][0]["bullets"][0]["text"]
+    real["text"] = source + "x"
+    too_long = client.post("/api/v2/resumes/tailor/job/ag-job/save", json={"doc": doc, "removed_projects": view["removed_projects"]})
+    assert too_long.status_code == 422 and too_long.json()["problems"][0]["code"] == "bullet_too_long"
+    real["text"] = source
+    doc["sections"][0]["entries"][0]["bullets"].pop()
+    fewer = client.post("/api/v2/resumes/tailor/job/ag-job/save", json={"doc": doc, "removed_projects": view["removed_projects"]})
+    assert fewer.status_code == 422 and fewer.json()["problems"][0]["code"] == "bullet_count"
+    # The drafts are its choice to change above, not in the save.
+    doc = view["doc"]
+    moved = client.post("/api/v2/resumes/tailor/job/ag-job/save", json={"doc": doc, "removed_projects": []})
+    assert moved.status_code == 409
 
 
 @needs_tex

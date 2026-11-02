@@ -410,9 +410,9 @@ async def run(job, source, profile, ctx):
 
 
 def estimate_tokens(resume_chars, posting_chars):
-    # Three required calls (brief/write/blind critic), one revision, one bounded
-    # repair (a full plan, or the far smaller length fix). Includes schema overhead; the actual meter wins after execution.
-    return int(11000 + resume_chars * 1.5 + posting_chars * 1.3), 6500
+    # Three required calls (brief/write/blind critic), one revision, one bounded repair and the far smaller
+    # length fix. Includes schema overhead; the actual meter wins after execution.
+    return int(11500 + resume_chars * 1.5 + posting_chars * 1.3), 7000
 
 
 SPEC = ModeSpec(
