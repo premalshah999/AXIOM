@@ -832,18 +832,6 @@ class WorkdayAuth:
             for _ in range(60):
                 await asyncio.sleep(0.25)
                 body = await page.locator("body").inner_text()
-                error = await self.auth_error()
-                if error and not self.own_password and password_rules.refused(error):
-                    # The main password is the first choice. A page that refuses it (rules, "different from your previous 3
-                    # passwords") gets a random one that meets what it states, saved below only once it is accepted.
-                    self.own_password = True
-                    credentials = {**credentials, "password": self.random_password(error + " " + body, credentials["password"])}
-                    e.emit("account", "The employer refused the main password; using a random one that meets its rules")
-                    for field in await fields.all():
-                        self.secrets.append(await field.element_handle())
-                        await self.enter(field, credentials["password"])
-                    await self.click(visible[0], auth_submit=True)
-                    continue
                 if re.search(
                     r"password (?:has been|was) (?:successfully )?(?:changed|reset)|"
                     r"password (?:reset|change) (?:was )?successful|"
@@ -858,6 +846,20 @@ class WorkdayAuth:
                     e.emit("account", "Employer password recovered and saved securely")
                     self.attempted = False
                     return
+                try:
+                    error = "" if self.own_password else await self.auth_error()
+                except PlaywrightError:
+                    error = ""  # The page is moving on; the next look reads it.
+                if error and password_rules.refused(error):
+                    # The main password is the first choice. A page that refuses it (rules, "different from your previous 3
+                    # passwords") gets a random one that meets what it states, saved above only once it is accepted.
+                    self.own_password = True
+                    credentials = {**credentials, "password": self.random_password(error + " " + body, credentials["password"])}
+                    e.emit("account", "The employer refused the main password; using a random one that meets its rules")
+                    for field in await fields.all():
+                        self.secrets.append(await field.element_handle())
+                        await self.enter(field, credentials["password"])
+                    await self.click(visible[0], auth_submit=True)
             if (
                 not await page.locator('input[type="password"]:visible').count()
                 or await page.locator(
@@ -1169,15 +1171,6 @@ class WorkdayAuth:
                             await self.click(link)
                             await asyncio.sleep(0.5)
                         continue
-                    if action == "create" and not self.own_password and password_rules.refused(error):
-                        # The main password was the first choice; this employer gets a random one that meets what its page
-                        # states, kept for it alone and saved before the second Create, as the first was.
-                        self.own_password = True
-                        login = stored or self.shared_credentials()
-                        said = error + " " + await page.locator("body").inner_text()
-                        self.save_credentials({**login, "password": self.random_password(said, login["password"])}, "created_locally")
-                        e.emit("account", "The employer refused the main password; creating the account with a random one that meets its rules")
-                        continue
                     main = e.service.config.application_password
                     if (
                         action == "sign_in"
@@ -1186,6 +1179,8 @@ class WorkdayAuth:
                         and main
                         and stored["password"] != main
                         and not self.main_tried
+                        and not self.recovery_attempted
+                        and password_rules.may_try_again(0, error)
                     ):
                         # The saved password was refused: the main one is the next candidate, before any reset.
                         self.main_tried = True
@@ -1204,6 +1199,15 @@ class WorkdayAuth:
                             await self.recover()
                         else:
                             raise ValueError("Workday rejected the recovered password")
+                        continue
+                    if action == "create" and not self.own_password and password_rules.refused(error):
+                        # The main password was the first choice; this employer gets a random one that meets what its page
+                        # states, kept for it alone and saved before the second Create, as the first was.
+                        self.own_password = True
+                        login = stored or self.shared_credentials()
+                        said = error + " " + await page.locator("body").inner_text()
+                        self.save_credentials({**login, "password": self.random_password(said, login["password"])}, "created_locally")
+                        e.emit("account", "The employer refused the main password; creating the account with a random one that meets its rules")
                         continue
                     if action == "create" and not error:
                         # Account created; Workday returned to Sign In (often pending activation).
