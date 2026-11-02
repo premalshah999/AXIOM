@@ -108,6 +108,12 @@ def _approve_row(s, job):
                 "message": f'This job is already applied: "{" ".join((job.title or "").split())[:120] or "untitled role"}" at {job.company or "this employer"}.'}
     if job.status == "archived":
         raise ValueError("This job was removed; restore it before applying")
+    from .company_sites import WHY, allowed, is_company_site
+
+    # Bulk and automatic paths (Select all, the review batch, Needs you's Approve) never carry a company's own site into the line;
+    # the owner sends one from Job board > Company sites, or by Apply on its own page.
+    if not job.demo and is_company_site(job.ats) and not allowed(s, job_id):
+        raise QueueBlocked(WHY, outcome="excluded", code="company_site")
     if job.status != "ready":
         # The newest: the file the person gave AXIOM last, never an older or mistaken upload (a first run, 2026-11-01).
         job.resume_id = job.resume_id or s.scalar(

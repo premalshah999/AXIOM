@@ -102,9 +102,15 @@ def read(service):
             for row in s.scalars(select(Setting).where(Setting.key.startswith("job_control:", autoescape=True)))
         }
         requested = {k.removeprefix("owner_apply:") for k in s.scalars(select(Setting.key).where(Setting.key.startswith("owner_apply:", autoescape=True)))}
+    from .company_sites import KEY as CHOSEN, is_company_site
+
+    with db.session() as s:
+        chosen = {k.removeprefix(CHOSEN) for k in s.scalars(select(Setting.key).where(Setting.key.startswith(CHOSEN, autoescape=True)))}
+    # A company's own site is not a job the dispatcher could start (Job board > Company sites), so it is neither ready nor held.
     ready = [
         r for r in rows
         if r.id not in attempted and r.id not in requested and marks.get("job_control:" + r.id) not in {"paused", "deleted"}
+        and (r.id in chosen or not is_company_site(r.ats))
     ]
     board = board_snapshot(db, limit=None, jobs_only=True)["jobs"]
     listed = {j["id"]: j for j in board}
