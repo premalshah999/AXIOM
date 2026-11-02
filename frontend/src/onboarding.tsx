@@ -1049,7 +1049,7 @@ function ResumeStep({
                 <Monogram name="Skills" size="md" />
                 <span className="ax-ob-found-text">
                   <strong>Skills</strong>
-                  <small>{draft.skills.join(", ")}</small>
+                  <small className="is-all">{draft.skills.join(", ")}</small>
                 </span>
               </li>
             )}
