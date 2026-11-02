@@ -102,6 +102,9 @@ async def run(db, config, job_id: str, *, model=None, compile_fn=None, fresh=Fal
     try:
         await read_posting(db, config, job_id)
         result = await pipeline.prepare_resume(db, config, job_id, mode=row.mode, model=model, fresh=fresh, **kwargs)
+        if result.status == "failed" and result.cached and not fresh:
+            # The person chose this mode again: a stored failure is not their answer, and it may be from an older build.
+            result = await pipeline.prepare_resume(db, config, job_id, mode=row.mode, model=model, fresh=True, **kwargs)
     except asyncio.CancelledError:
         raise
     except Exception as exc:
