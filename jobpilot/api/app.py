@@ -19,6 +19,7 @@ from .routes import (
     job_board,
     jobs,
     knowledge,
+    license,
     mail,
     over_limit,
     owner,
@@ -64,6 +65,7 @@ def create_app(config: Settings | None = None):
     install_features(app, service)
     # Owner sign-up/sign-in and onboarding (2026-10-15); routes before the frontend catch-all.
     app.include_router(owner.router(service, sessions, throttle))
+    app.include_router(license.router(service))
 
     app.include_router(health.router(service))
     app.include_router(session.router(service, sessions, throttle))

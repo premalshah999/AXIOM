@@ -7,6 +7,9 @@
 #   AXIOM_NOTARY_PROFILE=name         then notarize, with credentials stored by `xcrun notarytool store-credentials`
 #   AXIOM_PG_PREFIX=/path             the PostgreSQL 17 to relocate (default: brew --prefix postgresql@17)
 #   AXIOM_TEX_ROOT=/path              the TeX Live or TinyTeX to take pdfTeX from (default: wherever pdflatex is)
+#   AXIOM_LICENSE=on                  the build asks for the owner's license key (default: off, and nothing about the app changes).
+#                                     Embeds the public key from ~/.config/axiom-license (scripts/axiom-license init), or the one in
+#                                     AXIOM_LICENSE_PUBLIC_KEY. docs/LICENSING.md
 #
 # Needs a build machine with Command Line Tools, uv, npm, PostgreSQL 17 and TeX Live or TinyTeX. The Mac that installs the result needs none of them.
 set -eu
@@ -87,6 +90,18 @@ for package in "$root"/libs/*/src/axiom_* "$root"/services/*/src/axiom_* "$root"
   [ -d "$package" ] && ditto "$package" "$resources/app/$(basename "$package")"
 done
 find "$resources/app" -type d -name __pycache__ -prune -exec rm -rf {} +
+# The build setting for licensing (jobpilot/licensing.py): the file's presence is what turns it on, so a stray one in a checkout
+# must not reach a build that did not ask for it.
+rm -f "$resources/app/jobpilot/license_build.json"
+if [ "${AXIOM_LICENSE:-off}" = on ]; then
+  say "License key required (the public key is embedded; the private key stays on this Mac)"
+  license_public=${AXIOM_LICENSE_PUBLIC_KEY:-$(PYTHONDONTWRITEBYTECODE=1 "$py" "$root/scripts/axiom_license.py" public)} \
+    || fail "no license key pair here. Run: scripts/axiom-license init"
+  [ -n "$license_public" ] || fail "no license public key"
+  printf '{"required": true, "public_key": "%s"}\n' "$license_public" >"$resources/app/jobpilot/license_build.json"
+elif [ "${AXIOM_LICENSE:-off}" != off ]; then
+  fail "AXIOM_LICENSE is on or off"
+fi
 cp "$root/scripts/chrome-worker.sh" "$root/scripts/chrome-twin.sh" "$resources/app/scripts/"
 cp "$root/scripts/lib/chrome.sh" "$resources/app/scripts/lib/"
 # The same licence files the image ships: AGPL for this code, and what the dashboard and the runtime bundle.

@@ -313,6 +313,12 @@ class QueueingMixin:
             # Every path that starts an application comes through here, whoever asks: the batch, a retry, an answered
             # question, a matched email, the repair agent, Telegram, an Apply click.
             refuse(s)
+            if not job.demo:
+                from ..licensing import require_license
+
+                # A key (when this build asks for one) is needed to START an application; a retry or continuation of one already
+                # started is not stopped by it, and neither is the demo, which sends nothing.
+                require_license(self.config.data_dir, continuing=bool(recovery_source_run))
             from ..reserved import require_approval
 
             # FAANG, MANGO and the Big Four wait for the owner's approval of this job, whichever path asks: the autopilot,

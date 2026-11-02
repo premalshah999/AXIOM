@@ -172,6 +172,7 @@ MAP = {
     "operations/superseded.py":          ("control:ops/superseded.py", "close_superseded_waits runs inside completion and moves to the ledger"),
 
     # ---- control: the owner ------------------------------------------------------------------------------------------
+    "licensing.py":                      ("control:owner/licensing.py", "the owner's offline license key (docs/LICENSING.md)"),
     "owner_account.py":                  ("control:owner/account.py", ""),
     "owner_apply.py":                    ("control:owner/apply.py", "`picked` moves to ledger:admission.py"),
     "owner_questions.py":                ("control:owner/questions.py", "split: document_for, generic, row_for are read at fill time and move to domain:answers/owner_view.py"),

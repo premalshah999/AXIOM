@@ -32,3 +32,4 @@ jobpilot/static/*
 .deepeval/
 .DS_Store
 *.log
+jobpilot/license_build.json

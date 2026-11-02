@@ -228,6 +228,23 @@ class ExecutionMixin:
                     require_intake(s, row.job_id)
                 except QueueBlocked as exc:
                     gate = host_health.Gate(0, "deployment_hold", str(exc))
+                if not s.get(Job, row.job_id).demo:
+                    from ..licensing import require_license
+
+                    try:
+                        # A run queued before the key ran out waits here, holding no browser, and starts once a key is entered.
+                        # What continues an application already started (a source run, a matched email, a check of an earlier
+                        # submission) is never held by it.
+                        require_license(
+                            self.config.data_dir,
+                            continuing=bool(
+                                row.packet.get("source_run_id")
+                                or row.packet.get("email_wait_resume")
+                                or row.packet.get("verification_only")
+                            ),
+                        )
+                    except QueueBlocked as exc:
+                        gate = host_health.Gate(0, "license", str(exc))
                 from ..application_budget import require_allowance
 
                 try:
