@@ -222,7 +222,10 @@ def load_build() -> Build:
 
 
 def public_key_of(text: str) -> Ed25519PublicKey:
-    return Ed25519PublicKey.from_public_bytes(base64.b64decode(text))
+    try:
+        return Ed25519PublicKey.from_public_bytes(base64.b64decode(text, validate=True))
+    except ValueError:
+        raise LicenseError("This copy of AXIOM was built with a damaged license setting. Install AXIOM again.") from None
 
 
 # --- this installation's license ------------------------------------------------------------------------------------------
@@ -376,6 +379,8 @@ class Licensing:
                 "Your AXIOM key has run out, so new applications are paused. Ones already started finish, and your data is "
                 "untouched. Enter a new key in AXIOM to carry on."
             )
+        if status["state"] == "invalid":
+            return False, status["reason"] + " New applications are paused until a key that works on this Mac is entered."
         return False, "AXIOM needs a valid key to start new applications. Enter one in AXIOM to carry on."
 
 
