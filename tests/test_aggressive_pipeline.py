@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import shutil
+from pathlib import Path
 
 import pytest
 
@@ -450,6 +451,70 @@ def test_one_quality_repair_then_rerun_gates(tmp_path):
     result = asyncio.run(run(JOB, source, PROFILE, ctx))
     assert [c[0] for c in model.calls] == ["Brief", "Plan", "Plan", "Critique"]
     assert result.report["deterministic_repairs"][0]["proposal_issues"]
+
+
+def test_a_bullet_names_its_input_however_the_sentence_words_it():
+    assert quality.names_input("Build a planner from FCC broadband records for field crews.", "FCC Broadband Data Collection records")
+    assert quality.names_input("Compare filings from SEC EDGAR by quarter.", "SEC EDGAR")
+    assert not quality.names_input("Build a planner from public records for field crews.", "FCC Broadband Data Collection records")
+
+
+def test_a_tool_counts_anywhere_in_the_posting_in_its_phrase_or_all_its_words():
+    posting = "Preferred: dbt. Build reporting tools. Experience with statistical models."
+    assert quality.in_posting(posting, "dbt")
+    assert quality.in_posting(posting, "statistical models")
+    assert quality.in_posting(posting, "models statistical")
+    assert not quality.in_posting(posting, "Kubernetes")
+    assert not quality.in_posting(posting, "statistical Kubernetes")
+
+
+def test_shape_is_settled_by_code_order_proof_points_and_one_third_bullet():
+    ps = proposals()
+    ps[0].proof_point, ps[1].proof_point, ps[2].proof_point = 2, 2, 0
+    ps[0].bullets = [*ps[0].bullets[:2], "Check the export against the source."]
+    ps[1].bullets = [*ps[1].bullets[:2], "Check the export against the source."]
+    fixed = quality.normalize_proposals(ps)
+    assert [p.proof_point for p in fixed] == [0, 1, 2]
+    assert sorted(len(p.bullets) for p in fixed) == [2, 2, 3]
+    assert quality.proposal_issues(fixed, [], POSTING) == []
+
+
+def test_keep_sound_never_keeps_a_draft_that_fails_a_truth_check():
+    ps = proposals()
+    ps[0].bullets[0] = "Built and shipped a public explorer from NYC Open Data."  # claims finished work
+    ps[1].bullets[0] += " Saved 94.7% of review time."  # an unmeasured metric
+    kept, dropped = quality.keep_sound(ps, [], POSTING)
+    assert [p.title for p in kept] == [ps[2].title]
+    assert [d["title"] for d in dropped] == [ps[0].title, ps[1].title]
+    assert any("completed work" in w for w in dropped[0]["problems"])
+    assert any("unmeasured" in w for w in dropped[1]["problems"])
+
+
+@needs_tex
+def test_a_draft_that_still_fails_is_left_out_and_the_tailoring_finishes(tmp_path):
+    bad = plan()
+    bad.proposals[1].bullets[0] = "Built and shipped a public explorer from SEC EDGAR for review teams."
+    model = stub(initial=bad, repair=bad)
+    source, ctx = context(tmp_path, model=model)
+    result = asyncio.run(run(JOB, source, PROFILE, ctx))
+    title = bad.proposals[1].title
+    assert [d["title"] for d in result.report["drafts_left_out"]] == [title]
+    assert title not in parse_check(result.pdf_path.read_bytes(), result.doc)["text"]
+    assert len(result.preview_projects) == 2
+
+
+@needs_tex
+def test_with_no_sound_draft_the_real_projects_carry_the_resume(tmp_path):
+    bad = plan()
+    for p in bad.proposals:
+        p.bullets[0] = "Built and shipped " + p.bullets[0]
+    model = stub(initial=bad, repair=bad)
+    source, ctx = context(tmp_path, model=model)
+    result = asyncio.run(run(JOB, source, PROFILE, ctx))
+    assert len(result.report["drafts_left_out"]) == 3
+    assert result.preview_projects == []
+    assert result.report["requires_project_approval"] is False
+    assert Path(result.pdf_path).exists()
 
 
 @needs_tex
