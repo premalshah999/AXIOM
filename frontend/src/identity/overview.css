@@ -793,6 +793,16 @@ button.ov-who:hover b {
   margin: 0;
   text-align: right;
 }
+.ov-score-facts + .ov-score-facts {
+  margin-top: var(--space-3);
+}
+.ov-score-facts dt.is-part {
+  padding-left: var(--space-3);
+  color: var(--ink-3);
+}
+.ov-score-facts dd.is-part {
+  color: var(--ink-3);
+}
 
 /* ---------- narrower ---------- */
 @media (max-width: 1239px) {

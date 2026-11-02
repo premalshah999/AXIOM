@@ -12,6 +12,8 @@ from sqlalchemy import select
 from ...db import Job, Run
 from ..pipeline import settled_confirmation
 from ..snapshot import SnapshotCache, build_snapshot, trusted_email
+from ..success import first_commits
+from ..success_core import fields, needs_own_commit, ours
 
 
 def _instant(value):
@@ -105,6 +107,11 @@ def router(service, cache: SnapshotCache) -> APIRouter:
                 .where(Job.demo.is_(False), settled_confirmation())
                 .order_by(Run.finished_at.desc())
             ).all()
+            # Whether AXIOM sent it is the success number's own test (success_core.ours), asked of every settled run of the job:
+            # one that proves the send stands whatever a later run found on the employer's page.
+            read = {row.id: fields(row.receipt or {}) for row in rows}
+            commits = first_commits(s, {row.job_id for row in rows if needs_own_commit(read[row.id])})
+            sent = {row.job_id for row in rows if ours(read[row.id], commits.get(row.job_id), row.created_at)}
             seen, results = set(), []
             for row in rows:
                 receipt = row.receipt or {}
@@ -122,7 +129,8 @@ def router(service, cache: SnapshotCache) -> APIRouter:
                         "ats": row.ats,
                         "website_confirmed": bool(receipt.get("website_confirmed")),
                         "email_confirmed": trusted_email(receipt),
-                        "existing_application": bool(receipt.get("existing_application_notice")),
+                        # On file with the employer, but not sent by AXIOM: no "sent" filter or daily count takes it.
+                        "existing_application": row.job_id not in sent,
                         "proof": _proof(
                             receipt,
                             bool(receipt.get("website_confirmed")),

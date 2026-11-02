@@ -572,6 +572,7 @@ export type Success = {
   ats: string;
   website_confirmed: boolean;
   email_confirmed: boolean;
+  /** On file with the employer but not sent by AXIOM (jobpilot/api/success_core.py `ours`): no "sent" filter or daily count takes it. */
   existing_application: boolean;
   /** What proved it (the server decides from the receipt): see PROOF in model.ts. */
   proof: Proof;
@@ -590,9 +591,23 @@ export type SuccessRow = {
   final_pct: number | null;
   first_try_pct: number | null;
   meets_target: boolean;
+  attempted: number;
+  /** Confirmed over every job tried. */
+  raw_pct: number | null;
+  strict_pct: number | null;
+  /** Confirmed on the employer's own page or email, over eligible. */
+  strong_pct: number | null;
+  first_try: number;
+  failed: number;
+  /** Jobs left out of eligible, by structured reason (success_core.py EXCLUDED). */
+  excluded: Record<string, number>;
+  failures: Record<string, number>;
+  evidence: { strong: number; medium: number; weak: number; kinds: Record<string, number> };
 };
 export type SuccessReport = {
   days: number;
+  /** The window's start: the jobs first tried at or after it. */
+  since: string;
   target: number;
   overall: SuccessRow;
   platforms: (SuccessRow & { ats: string; volume: boolean })[];
