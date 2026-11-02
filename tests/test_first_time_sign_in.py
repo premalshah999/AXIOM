@@ -36,7 +36,8 @@ def known_account(service, obs):
     engine = SimpleNamespace(service=service, form=FakeForm(obs), job={"url": URL}, result=None, emit=lambda *a, **k: None)
     flow = AccountFlow(engine)
     flow.store.save(URL, flow.store.shared(), "exists")
-    scope = origin(URL) + ":" + account_tenant(URL, URL)
+    tenant = account_tenant(URL, URL)
+    scope = origin(URL) + (":" + tenant if tenant and tenant != "unresolved_shared_tenant" else "")
     flow.attempts.add((scope, False))
     calls = []
 

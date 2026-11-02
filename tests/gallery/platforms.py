@@ -50,7 +50,7 @@ function makeSelect(name,rows){
     menu=document.createElement('div');menu.className='ud__select__dropdown';menu.id=name+'-list';menu.setAttribute('role','listbox');
     const r=sel.getBoundingClientRect();menu.style.cssText='position:absolute;z-index:1050;background:#fff;border:1px solid #888;width:'+r.width+'px;left:'+(r.left+scrollX)+'px;top:'+(r.bottom+scrollY)+'px';
     rows.forEach(t=>{const o=document.createElement('div');o.className='ud__select__list__item';o.setAttribute('role','option');o.textContent=t;
-      o.addEventListener('click',()=>{ph.textContent=t;ph.classList.remove('empty');store.value=t;hide()});menu.append(o)});
+      o.addEventListener('click',()=>{ph.className='ud__select__selector__selectItem';ph.textContent=t;store.value=t;hide()});menu.append(o)});
     document.body.append(menu);input.setAttribute('aria-expanded','true')});
   document.addEventListener('mousedown',e=>{if(menu&&!menu.contains(e.target)&&!sel.contains(e.target))hide()})}
 document.querySelectorAll('.period').forEach(el=>makePicker(el.id));
