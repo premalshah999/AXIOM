@@ -257,3 +257,81 @@ async def test_a_step_still_reported_incomplete_after_the_return_is_opened_once_
     assert await adapter.launch_assessment(obs, again=True) is True
     assert await adapter.launch_assessment(obs, again=True) is False
     assert adapter.launched == ["take", "take"]
+
+
+VOLUNTARY_TEXT = (
+    "Take Assessment Fifth Third participates in the Work Opportunity Tax Credit program. This survey is voluntary and will "
+    "not impact your employment. If you prefer not to complete, please click \"Take Assessment\" below, and within the link "
+    "click \"Decline tax credit screening\"."
+)
+
+
+def decline_page(adapter):
+    adapter.open_questionnaire([{"id": "next", "label": "Next", "automation_id": ""},
+                                {"id": "decline", "label": "Decline tax credit screening.", "automation_id": ""}])
+    adapter.text = "Employer Tax Credit Screening Full Name Street Address"
+
+
+async def test_a_survey_the_employer_calls_voluntary_is_declined_with_its_own_control_and_confirmation():
+    """Fifth Third (2026-11-02): the questionnaire was answered and e-signed, Workday showed Take Assessment again, and the run
+    opened it four times. The employer's step says "If you prefer not to complete ... click 'Decline tax credit screening' ...
+    this will allow you to navigate back to your application"; jobcredits.com confirms with "Opt Out" beside "Take Survey"."""
+    adapter = Scripted()
+    adapter.controls, adapter.text = [take()], VOLUNTARY_TEXT
+    assert await adapter.on_form(await adapter.scan()) is None and adapter.assessment_voluntary
+    decline_page(adapter)
+    modal = [{"id": "confirm", "label": "Opt Out", "automation_id": ""}, {"id": "stay", "label": "Take Survey", "automation_id": ""}]
+    original = adapter.form_click
+
+    async def click(control_id, auth_control=False, step_control=False, launch=False):
+        await original(control_id, auth_control, step_control, launch)
+        if control_id == "decline":
+            adapter.controls = adapter.controls + modal
+        if control_id == "confirm":
+            adapter.page.closed = True
+
+    adapter.e.form.click = click
+    assert await adapter.on_form(await adapter.scan()) is None
+    assert [c for c, _ in adapter.form_clicks] == ["decline", "confirm"]
+    assert adapter.filled == 0 and adapter.returned == 1  # nothing was answered or signed, and the run is back on Workday
+
+
+async def test_a_required_survey_is_answered_not_declined_the_first_time():
+    adapter = await opened()
+    assert not getattr(adapter, "assessment_voluntary", False)
+    decline_page(adapter)
+    await adapter.on_form(await adapter.scan())
+    assert adapter.filled == 1 and [c for c, _ in adapter.form_clicks] == ["next"]
+
+
+async def test_a_finished_survey_the_application_still_demands_is_declined_on_the_second_opening():
+    """Smithfield (Synergi): eight finished surveys and Workday still said "You must complete the assessment test"."""
+    adapter = await opened()
+    adapter.e.form.page = adapter.workday_page
+    adapter.e.form.survey_finished = True
+    demand = {**await adapter.scan(), "errors": ["Error - Page Error You must complete the assessment test to continue with your job application."]}
+    assert await adapter.launch_assessment(demand, again=True) is True and adapter.assessment_unrecorded
+    adapter.open_questionnaire([{"id": "next", "label": "Next", "automation_id": ""},
+                                {"id": "out", "label": "Opt-Out", "automation_id": ""}])
+    adapter.text = "Tax credit screening"
+    adapter.closes_on = "out"
+    await adapter.on_form(await adapter.scan())
+    assert [c for c, _ in adapter.form_clicks] == ["out"] and adapter.filled == 0 and adapter.returned == 1
+
+
+async def test_a_page_that_cannot_be_inspected_mid_redirect_is_read_again_not_given_up_on():
+    adapter = await opened()
+    adapter.open_questionnaire([])
+    reads = iter([{"observation_failure": True, "fields": [], "controls": []},
+                  {"observation_failure": True, "fields": [], "controls": []},
+                  {"fields": [{"label": "Have you received SNAP?", "type": "radio", "options": ["Yes", "No"]}], "controls": []}])
+    last = {}
+
+    async def scan():
+        nonlocal last
+        last = next(reads, last)
+        return {"url": adapter.page.url, "errors": [], "automation": [], "headings": [], "text": "Tax credit", "dialogs": [], **last}
+
+    adapter.e.form.scan = scan
+    seen = await adapter.assessment_scan()
+    assert seen["fields"] and not seen.get("observation_failure")
