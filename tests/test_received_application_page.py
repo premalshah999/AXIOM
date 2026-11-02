@@ -91,6 +91,26 @@ async def test_no_queue_takes_a_job_settled_by_the_receipt_page(service):
     assert refused.value.as_dict()["code"] == "submitted_or_uncertain"
 
 
+async def test_a_job_whose_earlier_run_stood_on_the_receipt_page_is_never_queued_again(service):
+    """Humana: the run left the page for Workday's sign-in and ended waiting_browser, so neither its state nor its route says sent."""
+    from jobpilot.admission import QueueBlocked, receipt_page_seen
+    from jobpilot.db import Event
+
+    with service.db.exclusive() as s:
+        s.add(Job(id="w1", identity="w1", url=JOB, ats="custom", company="Acme Health", status="waiting_browser"))
+        s.add(Run(id="wr1", job_id="w1", mode="submit", state="waiting_browser", reason="Workday did not reach an application form"))
+        s.add(Event(run_id="wr1", kind="browser", message="Opened application", data={"ats": "custom", "url": THANKS}))
+        s.add(Job(id="w2", identity="w2", url=JOB.replace("434028", "999999"), ats="custom", company="Acme Health", status="waiting_browser"))
+        s.add(Run(id="wr2", job_id="w2", mode="submit", state="waiting_browser", reason="x"))
+        s.add(Event(run_id="wr2", kind="browser", message="Opened application", data={"url": THANKS}))  # Another posting's receipt.
+    with service.db.session() as s:
+        assert receipt_page_seen(s, [s.get(Run, "wr1")], JOB)
+        assert not receipt_page_seen(s, [s.get(Run, "wr2")], s.get(Job, "w2").url)
+    with pytest.raises(QueueBlocked) as refused:
+        await service.queue("w1", "submit")
+    assert refused.value.as_dict()["code"] == "submitted_or_uncertain"
+
+
 @pytest.mark.parametrize("settled,outcome", [(True, "unchanged"), (False, "not_submitted")])
 async def test_the_repair_agent_cannot_reopen_it_as_not_submitted(service, monkeypatch, settled, outcome):
     """A model's reading of the page ("Submit a request" in its footer, no thanks in its words) never undoes what the address settled."""
@@ -183,7 +203,7 @@ def token_engine(*, delivers=True, locator=None, unsolved=None):
 
     async def browser_challenge():
         engine.tokens += 1
-        if delivers and not unsolved:
+        if delivers:
             delivered["sig"] = engine.tokens + 1000.0
         return unsolved
 
@@ -198,9 +218,71 @@ async def test_the_token_that_starts_the_send_is_not_followed_by_a_click_or_a_se
 
 
 async def test_an_unsolved_check_is_reported_with_nothing_sent():
-    engine = token_engine(unsolved={"state": "waiting_browser", "reason": "unsolved"})
+    engine = token_engine(delivers=False, unsolved={"state": "waiting_browser", "reason": "unsolved"})
     assert (await BrowserEngine.commit_by_token(engine, SUBMIT))["reason"] == "unsolved"
     assert not getattr(engine, "commit_token_sent", False)
+
+
+async def test_a_token_that_reached_the_page_is_a_possible_send_even_if_the_check_is_still_drawn():
+    """The solver delivers the token, its frame stays drawn, and it reports a check: reading that as "nothing sent" released the commit,
+    and a retry could send the application again."""
+    engine = token_engine(unsolved={"state": "waiting_browser", "reason": "frame still drawn", "blocker_type": "captcha"})
+    assert await BrowserEngine.commit_by_token(engine, SUBMIT) is True
+    assert engine.commit_token_sent is True and engine.tokens == 1
+    assert await BrowserEngine.commit_by_token(engine, SUBMIT) is True and engine.tokens == 1  # No second token either.
+
+
+async def test_the_commit_stays_armed_through_a_possible_send_and_nothing_clicks_after_it(monkeypatch):
+    """The adapter's commit around that verdict: still armed, its reservation kept, no click, and "sent nothing" is not available to it."""
+    releases, clicks = [], []
+
+    async def nothing(*args, **kwargs):
+        return None
+
+    async def by_token(final):
+        return True
+
+    async def not_delivered(*args):
+        releases.append(args)
+
+    async def click(*args, **kwargs):
+        clicks.append(args)
+
+    async def scan():
+        return {"controls": [SUBMIT], "fields": [], "errors": [], "url": REVIEW, "text": ""}
+
+    class Reached(Adapter):
+        page = SimpleNamespace(frames=[], url=REVIEW)
+
+        def __init__(self):
+            self.committed, self.commit_pages, self.job = False, set(), {"ats": "custom", "id": "j"}
+            self.form = SimpleNamespace(scan=scan, proof=nothing, click=click, locator=lambda _: None, meta={})
+            self.e = SimpleNamespace(
+                armed=False, form=self.form, commit_by_token=by_token, commit_not_delivered=not_delivered, quality_gate=nothing,
+                try_reserve_commit=nothing, solve_captcha=nothing, release_reservation=nothing,
+            )
+
+        def emit(self, *args, **kwargs):
+            pass
+
+        async def observed_final(self, obs):
+            return SUBMIT
+
+        def signature(self, step, obs):
+            return "review"
+
+    async def watching(*args, **kwargs):
+        raise TimeoutError  # The watch has begun; its own rules decide from here, armed.
+
+    monkeypatch.setattr("jobpilot.widgets.ensure_uncovered", nothing)
+    adapter = Reached()
+    monkeypatch.setattr("jobpilot.adapters.base.asyncio.sleep", watching)
+    with pytest.raises(TimeoutError):
+        await adapter.commit(SUBMIT)
+    assert adapter.e.armed is True and adapter.committed is True and releases == [] and clicks == []
+
+    engine = SimpleNamespace(commit_url=REVIEW, page=SimpleNamespace(url=REVIEW), commit_inflight=set(), commit_token_sent=True, commit_requests=[])
+    assert await BrowserEngine.commit_sent_nothing(engine) is False
 
 
 async def test_a_step_that_asks_no_token_is_clicked():

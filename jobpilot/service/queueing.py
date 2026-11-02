@@ -439,6 +439,14 @@ class QueueingMixin:
                     outcome="protected",
                     code="submitted_or_uncertain",
                 )
+            from ..admission import receipt_page_seen
+
+            if not job.demo and receipt_page_seen(s, previous, job.url):
+                raise QueueBlocked(
+                    "The employer's own page showed this application as received on an earlier attempt, so it is not sent again.",
+                    outcome="protected",
+                    code="submitted_or_uncertain",
+                )
             from ..company_sites import WHY, allowed, is_company_site
 
             # A company's own site is never started by anything automatic, nor by a click on the main list: the owner sends it from

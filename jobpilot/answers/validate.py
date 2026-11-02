@@ -32,6 +32,10 @@ AVAILABILITY_FACTS = {"fact:availability", "fact:notice_period", "fact:start_dat
 # form, became every SuccessFactors row's end date and "End date must be after Start date" stalled Cintas and
 # Supermicro (2026-10-27). Such dates come from the profile's history rows only.
 BARE_HISTORY_DATE = re.compile(r"\s*(?:start|end|from|to)(?: date)?(?: (?:month|year|day))?\s*[:*]?\s*", re.I)
+# A question called only "Other" names nothing, so what was answered to one is not an answer to the next. One person's reply to an "Other"
+# follow-up (2026-10-23) was typed into Memorial Sloan Kettering's optional "Other" social-network URL, the page answered "Invalid URL", and
+# five runs stopped there (2026-11-01); a page that did not check would have kept it.
+BARE_OTHER = re.compile(r"\s*others?\s*[:*]?\s*", re.I)
 
 
 
@@ -323,7 +327,7 @@ class ValidateMixin:
             # The applicant's date of birth answered a bare "Date:" (a signature date) and, saved, every "End Date"
             # (Supermicro, Cintas 2026-10-27). It answers only a question about birth or age.
             valid_evidence = False
-        if BARE_HISTORY_DATE.fullmatch(field["label"]) and any(
+        if (BARE_HISTORY_DATE.fullmatch(field["label"]) or BARE_OTHER.fullmatch(field["label"])) and any(
             x.startswith(("reviewed:", "knowledge:m:review:")) for x in a.evidence_ids
         ):
             valid_evidence = False
@@ -500,7 +504,8 @@ class ValidateMixin:
             and value is not None
             and topic(field["label"]) == "background_check"
             and any(re.search(r"convict|criminal", x) for x in a.evidence_ids)
-            and not re.match(r"^\s*(?:yes|true|i am able|able)\b", value, re.I)
+            # "I agree" to "I will cooperate fully in and must pass a background check" reads the fact the right way round (Brigham Young, 2026-11-01).
+            and not re.match(r"^\s*(?:yes|true|i am able|able|i agree|i accept|i acknowledge)\b", value, re.I)
         ):
             # The conviction fact backs only the applicant's ability to clear a records check: a "No" cited to it reads the
             # fact backwards (it says there is no record).

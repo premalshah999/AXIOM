@@ -100,6 +100,7 @@ _STOPS = (
     (re.compile(r"^Employer field errors stayed on the form", re.I), "The site showed errors on the form after Submit and did not accept it."),
     (re.compile(r"^Only an observed dismiss control can close a dialog", re.I), "A pop-up covered the form and AXIOM could not close it."),
     (re.compile(r"^Answer evidence did not match the question scope", re.I), "AXIOM could not back an answer with your saved facts, so it stopped before sending."),
+    (re.compile(r"^The applicant's saved application source is not offered", re.I), "This form does not offer the way you said you find jobs. Add one of its choices in your profile's answers, or allow any other plain channel there."),
     (re.compile(r"^No final submit control is on this page", re.I), "AXIOM could not find the Submit button on this page."),
     (re.compile(r"^Application already used its initial attempt and two retries", re.I), "It has used all three of its attempts."),
     (re.compile(r"^Employer sign-in must complete", re.I), "The employer's sign-in did not finish."),

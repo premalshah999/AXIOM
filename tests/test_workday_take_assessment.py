@@ -402,3 +402,59 @@ async def test_a_page_that_cannot_be_inspected_mid_redirect_is_read_again_not_gi
     adapter.e.form.scan = scan
     seen = await adapter.assessment_scan()
     assert seen["fields"] and not seen.get("observation_failure")
+
+
+async def test_a_vendor_sign_in_behind_take_assessment_gets_no_password_and_closes_as_a_test_of_the_person():
+    """GreatAmerica (2026-11-01): the applicant's email and shared password were posted to the Predictive Index's login on four runs."""
+    adapter = await opened()
+    adapter.open_questionnaire([{"id": "in", "label": "Sign In", "automation_id": ""}])
+    adapter.text = "Sign In Username Password"
+    login = [{"id": "u", "label": "UserName", "type": "text", "options": []}, {"id": "p", "label": "Password", "type": "password", "options": []}]
+
+    async def scan():
+        return {"url": adapter.page.url, "controls": adapter.controls, "errors": [], "automation": [], "headings": [], "text": adapter.text,
+                "dialogs": [], "fields": login}
+
+    adapter.e.form.scan = scan
+    result = await adapter.on_assessment()
+    assert result["state"] == "closed" and result["blocker_type"] == "personal_test"
+    assert adapter.filled == 0 and adapter.form_clicks == []
+    adapter.text = "Work Opportunity Tax Credit Sign In"
+    assert (await adapter.on_assessment())["state"] == "waiting_browser"
+
+
+@pytest.mark.parametrize(
+    "url,on_vendor,state",
+    [
+        ("https://assess.vendor.test/login", True, "closed"),
+        ("https://www.linkedin.com/checkpoint/lg/login", False, "waiting_browser"),
+        ("https://accounts.google.com/signin", False, "waiting_browser"),
+    ],
+)
+async def test_the_account_flow_types_nothing_on_a_vendors_or_identity_providers_sign_in(url, on_vendor, state):
+    from jobpilot.accounts.flow import AccountFlow
+
+    touched = []
+    flow = AccountFlow.__new__(AccountFlow)
+    obs = {"fields": [{"id": "p", "label": "Password", "type": "password"}], "controls": [], "text": "Sign In", "headings": [], "errors": []}
+
+    async def scan():
+        return obs
+
+    async def no(*args, **kwargs):
+        return False
+
+    form = SimpleNamespace(scan=scan, frames={"p": SimpleNamespace(url=url)}, on_questionnaire=lambda: on_vendor,
+                           page=SimpleNamespace(url=url), locator=lambda _: touched.append(_),
+                           resolver=SimpleNamespace(profile=SimpleNamespace(allow_account_creation=True)))
+    flow.e = SimpleNamespace(service=SimpleNamespace(db=None), form=form, result=None)
+    flow.store = SimpleNamespace()
+    flow.apply_as_guest = flow.acknowledge_policy = flow.security_questions = flow.dayforce_id = no
+    import jobpilot.agent_settings as settings
+
+    original, settings.enabled = settings.enabled, lambda db, name: True
+    try:
+        assert await flow.handle() is True
+    finally:
+        settings.enabled = original
+    assert flow.e.result["state"] == state and touched == []

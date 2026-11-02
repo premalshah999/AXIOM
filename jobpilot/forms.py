@@ -1887,11 +1887,16 @@ class FormSession:
 
     def note_survey(self, state):
         """This application's survey outcome for the answer rules: "launched" when the run opened the tax-credit survey, "finished" once the run
-        came back from it, "declined" when it used the questionnaire's own way out (coming back from that finishes nothing). A resolver without
-        the attribute (a test double) simply has no record."""
+        came back from it, "declined" when it used the questionnaire's own way out. A decline stays: opening the survey again or coming back
+        from it finishes nothing, and "Did you complete the WOTC survey?" must not turn Yes. If this run also wrote answers on the survey, neither
+        word can be proved and it is "unproven", the person's to say. A resolver without the attribute (a test double) simply has no record."""
         current = getattr(self.resolver, "survey", "")
-        if (state == "launched" and current == "finished") or (state == "finished" and current == "declined"):
+        if current == "unproven" or (state == "launched" and current == "finished"):
             return
+        if current == "declined" and state in {"launched", "finished"}:
+            if not any(record.get("external") for record in getattr(self, "ledger", {}).values()):
+                return
+            state = "unproven"
         try:
             self.resolver.survey = state
         except AttributeError:

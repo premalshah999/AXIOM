@@ -18,6 +18,14 @@ from .pages import registration_state
 from .tenants import account_tenant
 
 
+# Other companies' sign-ins that a page can lead to. The saved and shared passwords are never theirs.
+IDENTITY_PROVIDER = re.compile(
+    r"(?:^|\.)(?:linkedin\.com|facebook\.com|github\.com|twitter\.com|x\.com)$|"
+    r"^(?:accounts\.google\.com|appleid\.apple\.com|login\.live\.com|login\.microsoftonline\.com)$",
+    re.I,
+)
+
+
 class FlowHandleMixin:
     async def handle(self):
         from ..agent_settings import enabled
@@ -50,10 +58,27 @@ class FlowHandleMixin:
         ]
         if not passwords:
             return await self.open_create_account_form(obs) or await self.open_sign_in_gate(obs)
+        if getattr(e.form, "on_questionnaire", lambda: False)():
+            # A sign-in on the vendor a launcher opened is not the employer's. GreatAmerica's "Take Assessment" led to the Predictive Index's
+            # login (2026-11-01): the applicant's email and shared password were posted to it on four runs. Nothing is typed there.
+            from ..adapters.base import assessment_login_result
+
+            e.result = assessment_login_result(obs.get("text", ""))
+            return True
         frame = e.form.frames[passwords[0]["id"]]
         if any(e.form.frames[f["id"]] != frame for f in passwords):
             raise AccountActionError("Account password fields span different frames", "observation_failure")
         account_url = frame.url
+        if IDENTITY_PROVIDER.search(urlsplit(account_url).hostname or ""):
+            # The owner's rule: no application is made with these logins (social_login_only). The model pressed "Sign in using LinkedIn" on a
+            # Microsoft posting (2026-11-02) and the saved password was then typed into LinkedIn's own login, three runs in a row.
+            e.result = {
+                "state": "waiting_browser",
+                "reason": "The page led to a third-party login, and no password is typed there; nothing was sent",
+                "blocker_type": "control_failure",
+                "recovery_cause": "control_observation",
+            }
+            return True
         creating = len(passwords) > 1 or any(f.get("autocomplete") == "new-password" for f in passwords)
         # TikTok: "Create Account" page with one password and no new-password hint was treated as
         # sign-in, so its "Create" button made the action ambiguous and no credentials were sent.

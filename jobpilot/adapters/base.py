@@ -230,6 +230,19 @@ def survey_called_voluntary(text):
 
 
 PERSONAL_TEST_REASON = "The employer requires a personal test (personality, aptitude or skills) that only you can take, so nothing was sent"
+
+
+def assessment_login_result(text):
+    """A questionnaire vendor's own sign-in: no saved login belongs there, and no password is typed. A tax-credit survey behind one is the
+    person's to reach; anything else behind one is a test of the person, closed as such."""
+    if TAX_CREDIT.search(text or ""):
+        return {
+            "state": "waiting_browser",
+            "reason": "The tax-credit questionnaire asks for a sign-in of its own, and nothing was typed there; nothing was sent",
+            "blocker_type": "control_failure",
+            "recovery_cause": "control_observation",
+        }
+    return {"state": "closed", "reason": PERSONAL_TEST_REASON, "blocker_type": "personal_test"}
 ASSESSMENT_EXIT = re.compile(r"\blater\b|\bexit\b|\bcancel\b|\bquit\b|\bclose\b|\bwithout\b|\bdecline\b|\bdisagree\b", re.I)
 
 
@@ -1120,6 +1133,8 @@ class Adapter:
         before = await self.assessment_scan()
         if personal_test(before.get("text", "")):
             return {"state": "closed", "reason": PERSONAL_TEST_REASON, "blocker_type": "personal_test"}
+        if any(f.get("type") == "password" for f in before.get("fields") or []):
+            return assessment_login_result(before.get("text", ""))
         # A survey that asks for a Social Security number closes under the owner's rule before anything on it is answered or asked of a model.
         from ..sensitive_ids import sensitive_matches, stop_if_sensitive
 
@@ -1402,12 +1417,8 @@ class Adapter:
                 if challenge := await self.solve_captcha():
                     return challenge
             obs = await self.form.scan()
-            from ..browser import received_application_page
             from ..browser_contracts import missing_posting_notice
 
-            if received_application_page(obs.get("url"), self.job["url"]):
-                # Whoever got here, the employer has this application: its "Continue" only leads to an account to watch the status.
-                return self.e.received_application()
             if not self.committed and missing_posting_notice(obs, self.job["url"]):
                 return await self.on_closed(obs)
             from ..account_identity import stop_if_identity_conflict
@@ -1432,6 +1443,11 @@ class Adapter:
             if not self.committed and (locked := self.site_lock(obs)):
                 return locked
             step = self.classify_page(obs)
+            from ..browser import received_application_page
+
+            if step != Step.CONFIRMATION and received_application_page(obs.get("url"), self.job["url"]):
+                # Whoever got here, the employer has this application: its "Continue" only leads to an account to watch the status.
+                return self.e.received_application()
             if step != Step.EMAIL_ENTRY:
                 self.pending_auth_transition_source = None
             if self.committed and step not in {Step.CONFIRMATION, Step.ALREADY_APPLIED}:

@@ -614,7 +614,7 @@ COMMIT_INPUT_GRACE_SECONDS = 1.5
 # Each read of the page for the witness. A page too busy to answer is doubt: the click stays uncertain.
 COMMIT_WATCH_SECONDS = 3
 # How long a commit waits for a token's callback to start the send before pressing the button itself.
-COMMIT_TOKEN_SECONDS = 4
+COMMIT_TOKEN_SECONDS = 8
 RECEIVED_REASON = "The employer's own page for this posting shows the application went through, so it was not sent again"
 # Controls whose disabled state means the page has an unfinished requirement.
 STEP_ACTION = re.compile(
@@ -741,6 +741,32 @@ def unoffered_source_result(question, rules=None):
         "blocker_type": "control_failure",
         "reason": "The applicant's saved application source is not offered for this question; "
         "owner review needed: " + str(question)[:160],
+    }
+
+
+def unbacked_answers_result(pending):
+    """No saved fact backs what the model proposed for these required questions, so they are the person's to answer: the rule is to ask when
+    unsure. This ended as "saved for answer repair" with nothing asked and was tried again on the same words: Brigham Young's "I waive any
+    privileges ... I release from any liability" (I agree / I don't agree), three runs on 2026-11-01. A row that cannot be asked as it stands (no
+    wording read) stays with recovery; completion hands a row the person cannot answer back to it too (Service.review_kind)."""
+    asked = [
+        {**q, "blocker_type": "missing_fact", "retryable": False, "reason": "The answer is not in the saved profile"}
+        for q in pending
+        if str(q.get("question") or "").strip() and q.get("key")
+    ]
+    if asked:
+        return {
+            "state": "needs_review",
+            "reason": "Needs the applicant's answer: " + asked[0]["question"][:160],
+            "blocker_type": "missing_fact",
+            "reviews": asked,
+        }
+    # Persist the typed cause and release this owner instead of paying for identical fill/navigation loops.
+    return {
+        "state": "waiting_browser",
+        "blocker_type": "model_output",
+        "recovery_cause": "model_output",
+        "reason": "Answer evidence did not match the question scope; saved for answer repair",
     }
 
 
@@ -4606,20 +4632,23 @@ class BrowserEngine:
         return any(final_by_marking(control, url) for control in controls)
 
     async def commit_by_token(self, control):
-        """The commit on such a page, armed. A dict: the check stayed unsolved, nothing was delivered, nothing was sent. True: the callback
-        started the send and no click may follow it (the button is disabled by then; a second token is a second post: Humana's review
-        step saw three). None: not such a page, or the token moved nothing: the ordinary click."""
+        """The commit on such a page, armed. A dict: no token reached the page and the check stayed unsolved, so nothing was sent. True: a token
+        reached the page, so its callback may have posted the application: the commit stays armed, nothing clicks after it (the button is
+        disabled by then; a second token is a second post: Humana's review step saw three) and the run is never retried. None: not such a page,
+        no token was asked for, or the token moved nothing: the ordinary click."""
         if getattr(self, "commit_token_sent", False):
             return True
         if not final_by_marking(control, getattr(getattr(self.form, "page", None), "url", "")):
             return None
         delivered = getattr(self.captcha, "token_delivered_at", {})
         before = max(delivered.values(), default=0)
-        if challenge := await self.browser_challenge():
-            return challenge
+        challenge = await self.browser_challenge()
+        # What reached the page decides, first: the solver can deliver the token and still report a check, if its frame stays drawn.
         if max(delivered.values(), default=0) <= before:
-            return None  # This step asked for no token: the button is the way.
+            return challenge  # Nothing delivered: an unsolved check, or a step that asks for no token and takes its button.
         self.commit_token_sent = True
+        if challenge:
+            return True
         url = self.form.page.url
         locator = self.form.locator(control["id"])
         deadline = time.monotonic() + COMMIT_TOKEN_SECONDS
@@ -4632,7 +4661,7 @@ class BrowserEngine:
             except PlaywrightError:
                 return True  # The control went with the page it was on.
             await asyncio.sleep(0.2)
-        self.commit_token_sent = False  # Nothing moved: the page waits for its button.
+        self.commit_token_sent = False  # Nothing moved in all that time: the page waits for its button.
         return None
 
     async def commit_not_delivered(self, control, exc):
@@ -4889,6 +4918,8 @@ class BrowserEngine:
         url = getattr(self, "commit_url", "")
         if not url or getattr(self.page, "url", "") != url or getattr(self, "commit_inflight", None):
             return False
+        if getattr(self, "commit_token_sent", False):
+            return False  # A token reached a page whose callback is the send (commit_by_token): what it did is not known from here.
         # A write the employer refused with a 4xx accepted nothing (Dallas County: its work-history item answered 400
         # and the application was never posted). A 5xx may have been partly processed and stays uncertain, and so does
         # a 401/403: Rippling answered its apply POST 401 "turnstile_verification_failure" and still created the
@@ -5458,9 +5489,6 @@ class BrowserEngine:
             obs = await self.recover_empty_observation(obs)
             from .browser_contracts import missing_posting_notice
 
-            if received_application_page(obs.get("url"), self.job["url"]):
-                self.result = self.received_application()
-                return
             if not self.armed and missing_posting_notice(obs, self.job["url"]):
                 self.result = {"state": "closed", "reason": "The employer reports that the requested posting could not be found"}
                 return
@@ -5474,6 +5502,12 @@ class BrowserEngine:
             if stop_if_social_login_only(self, obs):
                 return
             adapter = getattr(self, "fallback_mail_adapter", None)
+            if received_application_page(obs.get("url"), self.job["url"]):
+                from .adapters.base import Step
+
+                if not adapter or adapter.classify_page(obs) != Step.CONFIRMATION:
+                    self.result = self.received_application()
+                    return
             if adapter and not self.armed:
                 from .adapters.base import Step
 
@@ -5862,15 +5896,8 @@ class BrowserEngine:
                         else:
                             self.result = unoffered_source_result(unoffered[0].get("question", ""), source_rules(self))
                     elif terminal_answer_errors:
-                        # Browsing a picker cannot repair a rejected supporting fact.
-                        # Persist the typed cause and release this owner instead of
-                        # paying for identical fill/navigation loops.
-                        self.result = {
-                            "state": "waiting_browser",
-                            "blocker_type": "model_output",
-                            "recovery_cause": "model_output",
-                            "reason": "Answer evidence did not match the question scope; saved for answer repair",
-                        }
+                        # Browsing a picker cannot repair a rejected supporting fact, and neither does a retry.
+                        self.result = unbacked_answers_result(terminal_answer_errors)
                     elif internal_blocker:
                         self.emit(
                             "internal_repair", "Known-answer control failures remain in owned-page recovery"
