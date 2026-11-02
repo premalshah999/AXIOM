@@ -521,6 +521,10 @@ def test_shape_is_settled_by_code_order_proof_points_and_one_third_bullet():
     assert [p.proof_point for p in fixed] == [0, 1, 2]
     assert sorted(len(p.bullets) for p in fixed) == [2, 2, 3]
     assert quality.proposal_issues(fixed, [], POSTING) == []
+    # With no project of the resume's to size it, a draft still holds three bullets at most.
+    ps = proposals()
+    ps[0].bullets = [*ps[0].bullets[:2], *["Check the export against the source."] * 4]
+    assert len(quality.normalize_proposals(ps)[0].bullets) == 3
 
 
 @pytest.mark.parametrize(

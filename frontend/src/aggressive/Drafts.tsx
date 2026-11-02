@@ -100,6 +100,7 @@ export function AggressiveDrafts({ workspaceId, jobId, needsUpdate, disabled, on
   if (!data) return <div className="ag-drafts" aria-live="polite">{error ? <p role="alert">{error}</p> : <p>Loading project drafts…</p>}</div>;
   const originals = data.source_doc.sections.filter(s => s.include && s.kind === "projects").flatMap(s => s.entries.filter(e => e.include));
   const unapproved = data.drafts.filter(d => data.selected_drafts.includes(d.id) && !d.confirmed).length;
+  const replaced = (d: Project) => originals.find(p => p.id === d.replaces)?.heading;
   return <section className="ag-drafts" aria-label="Aggressive project drafts" aria-busy={busy}>
     <p className="ag-warning" role="note">{INSPIRED_WARNING}</p>
     <p className="ag-meta" role="note">Figures in [target: ...] brackets are inspired values, not results. Replace each with what you really measure.</p>
@@ -123,7 +124,7 @@ export function AggressiveDrafts({ workspaceId, jobId, needsUpdate, disabled, on
       <label className="ag-choice"><input type="checkbox" checked={data.selected_drafts.includes(d.id)} disabled={busy || disabled}
         onChange={e => chooseDraft(d, e.target.checked)} />
         <span>{d.title}</span></label>
-      <p className="ag-meta">{d.confirmed ? "Approved project" : "Draft · Not built yet"} · {d.archetype}{originals.some(p => p.id === d.replaces) ? ` · replaces ${originals.find(p => p.id === d.replaces)!.heading}` : ""}</p>
+      <p className="ag-meta">{d.confirmed ? "Approved project" : "Draft · Not built yet"} · {d.archetype}{replaced(d) ? ` · replaces ${replaced(d)}` : ""}</p>
       <ul>{d.bullets.map((b, i) => <li key={i}>{b}</li>)}</ul>
       <details><summary>How to build it</summary><ol>{d.build_plan.map((s, i) => <li key={i}>{s}</li>)}</ol></details>
       {!d.confirmed && <div className="ag-approve"><p>Approve only once you've verified every detail of this project is accurate.</p>

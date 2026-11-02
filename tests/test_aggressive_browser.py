@@ -6,6 +6,7 @@ shared screen wiring is Claude Code's responsibility. No visual approval tests.
 
 import asyncio
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -20,6 +21,12 @@ import pytest
 
 
 REPO = Path(__file__).resolve().parents[1]
+
+
+def pdf_text(body):
+    from pypdf import PdfReader
+
+    return "\n".join(page.extract_text() for page in PdfReader(io.BytesIO(body)).pages)
 
 
 def serve(port, static_root, data_dir):
@@ -195,6 +202,8 @@ def build_ui(tmp_path):
 
 @pytest.mark.browser
 async def test_drafts_approval_original_switch_and_exact_upload(page, tmp_path):
+    from test_aggressive_pipeline import ORIGINALS, proposals
+
     if not shutil.which("pdflatex"):
         pytest.skip("Needs TeX")
     static = build_ui(tmp_path)
@@ -267,6 +276,15 @@ async def test_drafts_approval_original_switch_and_exact_upload(page, tmp_path):
         assert await page.get_by_text("Approve only once you've verified every detail of this project is accurate.").count() == 3
         pdf = await page.request.get(url + f"/api/v2/resumes/artifacts/{initial['artifact']['id']}/pdf")
         assert pdf.ok
+        printed = pdf_text(await pdf.body())
+        assert all(p.title in printed for p in proposals())
+        assert all(heading not in printed for heading, _ in ORIGINALS.values())
+        # The drafts took their projects' places, and each card says whose.
+        kept_originals = page.locator(".ag-drafts > .ag-project input[type=checkbox]")
+        assert [await kept_originals.nth(i).is_checked() for i in range(3)] == [False, False, False]
+        for heading, _ in ORIGINALS.values():
+            assert await page.get_by_text(f"replaces {heading}").count() == 1
+        assert await page.get_by_text("Draft · Not built yet").count() == 3
         blocked = await page.request.post(
             url + "/api/v2/resumes/tailor/job/ag-job/approve",
             data={"artifact_id": initial["artifact"]["id"], "apply": False},
@@ -282,6 +300,15 @@ async def test_drafts_approval_original_switch_and_exact_upload(page, tmp_path):
         original = await current()
         assert original["rules"]["ok"] and not original["drafts"]
         assert original["cost"]["calls"] == 0
+        assert original["removed_projects"] == []
+        # "Use only my original projects" brought every one of them back, on the page and on the file.
+        printed = pdf_text(
+            await (await page.request.get(url + f"/api/v2/resumes/artifacts/{original['artifact']['id']}/pdf")).body()
+        )
+        assert all(heading in printed for heading, _ in ORIGINALS.values())
+        assert all(p.title not in printed for p in proposals())
+        assert [await kept_originals.nth(i).is_checked() for i in range(3)] == [True, True, True]
+        assert await page.get_by_role("button", name="Use only my original projects").is_disabled()
         checks = page.locator(".ag-projects input[type=checkbox]")
         for i in range(3):
             assert not await checks.nth(i).is_checked()
@@ -289,6 +316,19 @@ async def test_drafts_approval_original_switch_and_exact_upload(page, tmp_path):
             await page.wait_for_function(
                 "() => document.querySelector('[aria-label=\"Aggressive project drafts\"]')?.getAttribute('aria-busy') === 'false'"
             )
+            # Choosing a draft gives way its project, and only that one.
+            assert [await kept_originals.nth(k).is_checked() for k in range(3)] == [k > i for k in range(3)]
+        # Choosing a project again takes its place back from the draft, and the reverse.
+        await kept_originals.nth(0).check()
+        await page.wait_for_function(
+            "() => document.querySelector('[aria-label=\"Aggressive project drafts\"]')?.getAttribute('aria-busy') === 'false'"
+        )
+        assert not await checks.nth(0).is_checked()
+        await checks.nth(0).check()
+        await page.wait_for_function(
+            "() => document.querySelector('[aria-label=\"Aggressive project drafts\"]')?.getAttribute('aria-busy') === 'false'"
+        )
+        assert not await kept_originals.nth(0).is_checked()
         for _ in range(3):
             await page.get_by_role("button", name="Approve project", exact=True).first.click()
             await page.wait_for_function(
@@ -316,6 +356,7 @@ async def test_drafts_approval_original_switch_and_exact_upload(page, tmp_path):
             == result["artifact"]["pdf_sha"]
         )
         assert outcome["applications"][0]["resume"] == "Alex_Example_Resume.pdf"
+        assert result["removed_projects"] == list(ORIGINALS)
     finally:
         process.terminate()
         try:

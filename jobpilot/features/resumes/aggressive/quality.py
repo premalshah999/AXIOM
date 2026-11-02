@@ -187,8 +187,7 @@ def normalize_proposals(proposals, shapes=()):
             p.proof_point = free.pop(0)
         seen.add(p.proof_point)
         if len(p.bullets) > 2:
-            if third:
-                p.bullets = p.bullets[:2]
+            p.bullets = p.bullets[: 2 if third else 3]
             third = True
     return sorted(ordered, key=lambda p: p.proof_point)
 
