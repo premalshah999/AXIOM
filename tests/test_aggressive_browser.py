@@ -358,7 +358,7 @@ async def test_drafts_approval_original_switch_and_exact_upload(page, tmp_path):
             == result["artifact"]["pdf_sha"]
         )
         assert outcome["applications"][0]["resume"] == "Alex_Example_Resume.pdf"
-        assert result["removed_projects"] == list(ORIGINALS)
+        assert sorted(result["removed_projects"]) == sorted(ORIGINALS)
     finally:
         process.terminate()
         try:

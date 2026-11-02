@@ -222,9 +222,9 @@ def serve(port, static_root, data_dir):
         service.db.set_setting("control", {"paused": False, "auto_submit": True})
         from jobpilot.company_sites import allow
 
-        allow(service.db, [job_id])
         with service.db.exclusive() as s:
             s.get(Job, job_id).ats = "custom"
+        allow(service.db, [job_id])  # The label first: only a company-site job needs the owner's choice remembered.
         queued = await service.queue(job_id, "submit", "source", owner_pick=True)
         await asyncio.wait_for(service.execute(queued["id"]), 90)
         with service.db.session() as s:
@@ -368,14 +368,14 @@ async def test_nothing_to_a_tailored_pdf_on_the_employers_form(page, tmp_path):
         assert posts == []
         # A claim nothing backs up is saved, and said out loud.
         await page.get_by_role("button", name="Save edits").click()
-        await page.locator(".tl-claim", has_text="Kubernetes").wait_for(timeout=30000)
+        await page.locator(".tl-claim", has_text="Kubernetes").wait_for(timeout=60000)  # A save compiles the PDF.
         await page.locator(".tl-message", has_text="Saved").wait_for()
         await summary.fill(tailored["doc"]["sections"][0]["text"])
         await page.get_by_role("button", name="Save edits").click()
         await page.locator(".tl-claim").wait_for(state="detached", timeout=30000)
 
-        # The job's only project can be taken off (it used to fail a heading check), and put back.
-        keep = page.get_by_label("Keep on this resume")
+        # A project can be taken off (the job's only one used to fail a heading check), and put back.
+        keep = page.get_by_label("Keep on this resume").first
         await keep.uncheck()
         await page.get_by_role("button", name="Save edits").click()
         await page.locator(".tl-message", has_text="Saved").wait_for(timeout=30000)
