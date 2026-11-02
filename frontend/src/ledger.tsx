@@ -64,13 +64,14 @@ function hasProof(r: Success, kind: Evidence) {
   return kind === "all" || r.proof === kind;
 }
 
-// Local midnight of the first day the period covers, as epoch ms (0 for any time).
+// When the period starts, as epoch ms (0 for any time). Today is from local midnight, as Overview's Confirmed today; the others roll,
+// the same window as Overview's success number, so the two can be held side by side.
 function periodStart(period: Period, now: number) {
   const days = PERIODS.find((p) => p.value === period)?.days ?? 0;
   if (!days) return 0;
+  if (days > 1) return now - days * 86_400_000;
   const d = new Date(now);
   d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() - (days - 1));
   return d.getTime();
 }
 
