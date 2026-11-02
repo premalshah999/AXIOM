@@ -372,7 +372,7 @@ ROW_CONTEXT_JS = """el => {
   for (let n = walker.previousNode(), steps = 0; n && steps < 60 && !(out.caption && out.heading); n = walker.previousNode(), steps++) {
     const t = clean(n.textContent), host = n.parentElement;
     if (!t || !host || host.closest('script,style,noscript,option,button,a') || !/[a-z]{3}/i.test(t) || !visible(host)) continue;
-    if (own.has(t) || t.length > 400) continue;
+    if (own.has(t) || t.length > 1500) continue;
     const isHeading = host.closest('legend,[role=heading],h1,h2,h3,h4,h5,h6');
     if (isHeading) { if (!out.heading) out.heading = t; continue; }
     if (!out.caption && (t.length >= 12 || /\\?/.test(t)) && !host.closest('label')) out.caption = t;
@@ -3956,9 +3956,14 @@ class FormSession:
                 continue
             for key in ("caption", "heading"):
                 if found.get(key) and normalize(found[key]) != normalize(item["question"]):
-                    context[key] = found[key][:300]
+                    # A long paragraph ends with its question: keep the end ("...or any predecessor entities?").
+                    text = found[key]
+                    context[key] = text if len(text) <= 300 else "…" + text[-299:].lstrip()
             identity = {k: v for k, v in (found.get("identity") or {}).items() if v}
-            if identity and found.get("kind") and not context.get("history_identity"):
+            section = str((item.get("scope") or {}).get("section") or "")
+            # A question under "Additional Information" is not a school or job row, whatever block holds the page.
+            non_history = bool(section) and not re.search(r"experience|employ|education|school|history|work|job", section, re.I)
+            if identity and found.get("kind") and not context.get("history_identity") and not non_history:
                 context["history_kind"], context["history_identity"] = found["kind"], identity
                 if isinstance(found.get("index"), int) and found["index"] > 0:
                     context["row_index"] = found["index"]

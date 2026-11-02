@@ -139,7 +139,9 @@ def where(context):
 
 # A caption that is no question: it names a choice or a control, and the question is printed above it.
 GENERIC = re.compile(
-    r"none of the above|none|make selection here|(?:please )?select(?: one| an option| here)?|choose(?: one| here)?|"
+    r"none of the above|none|make selection here|(?:please )?(?:select|choose|indicate|answer)(?: one| an option| here)?"
+    # NYU Langone's "* Please select Yes or No." (2026-11-01) sits under a paragraph holding the real question.
+    r"(?: yes (?:or|/) no| yes no)?|choose(?: one| here)?|yes or no|"
     r"other(?: free text)?|please specify|specify|yes|no|n a|not applicable|tick(?: box| here)?|check(?: ?box| here)?|"
     r"(?:start|begin|from)? ?(?:(?:and|&)? ?(?:end|to)?)? ?dates?|start end date|begin date"
 )
@@ -201,6 +203,8 @@ def knowledge_question(question, context=None):
     text = tidy(question)
     if context.get("history_kind") or (len(normalize(text).split()) <= 2 and where(context)):
         return display(question, context)
+    if generic(text) and clean_caption(context.get("caption")):
+        return display(question, context)  # "Please select Yes or No" alone would answer every form that prints it.
     return text
 
 
@@ -216,7 +220,7 @@ def reusable_answer(kb, question, options=(), context=None, reason="", employer=
         or context.get("history_kind")
         or context.get("source") == "repair"
         or context.get("type") in {"checkbox", "password"}
-        or bare_label(question)
+        or generic(question)
     ):
         return None
     listed = [text for _, text in choices(options)]
