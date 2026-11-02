@@ -16,7 +16,8 @@ AT = datetime(2026, 11, 1, 14, tzinfo=UTC)
 
 
 def test_the_full_notice_gives_its_limit_and_its_period():
-    assert application_cap(NOTICE, AT) == {"limit": 2, "days": None, "until": "2027-01-01T12:00:00+00:00"}
+    assert application_cap(NOTICE, AT) == {
+        "limit": 2, "days": None, "until": "2027-01-01T12:00:00+00:00", "project": "Graduate - 2027 Start"}
 
 
 @pytest.mark.parametrize("text", [
@@ -60,11 +61,11 @@ def test_the_apps_own_trouble_and_the_owners_questions_say_nothing_about_the_emp
     assert verdict(rows(*own, *asks)) is None
 
 
-def add(service, company, n, ats="custom"):
+def add(service, company, n, ats="custom", title="Engineer"):
     with service.db.exclusive() as s:
         for i in range(n):
             s.add(Job(id=f"{company}{i}", identity=f"{company}{i}", url=f"https://careers.{company}.example.test/jobs/{i}", ats=ats,
-                      company=company, title="Engineer", status="ready"))
+                      company=company, title=title, status="ready"))
 
 
 def start(service, job_id):
@@ -76,7 +77,7 @@ def start(service, job_id):
 
 
 def test_one_refusal_holds_every_job_and_the_refused_one_waits_with_them(service):
-    add(service, "Limitco", 3)
+    add(service, "Limitco", 3, title="New Grad 2027: Engineer")  # The notice names the "Graduate - 2027 Start" project.
     run_id = start(service, "Limitco0")
     service.complete(run_id, {"state": "closed", "reason": "The employer's application limit: " + NOTICE,
                               "blocker_type": "employer_limit", "employer_cap": application_cap(NOTICE)}, 1)
