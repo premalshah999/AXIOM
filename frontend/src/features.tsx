@@ -99,6 +99,7 @@ export type MasterView = {
     source_words?: number;
     source_fill?: Fill;
     render_fill?: Fill;
+    picture_pages?: number[];
   };
   created_at: string;
   approved_at: string | null;

@@ -60,7 +60,7 @@ class SourceResume:
     doc: ResumeDoc
     style: Style
     pdf: bytes | None = None
-    origin: str = "master"  # master | import | profile
+    origin: str = "master"  # master | master_other (approved from another upload) | import
 
 
 @dataclass

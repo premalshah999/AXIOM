@@ -132,7 +132,8 @@ class Section(BaseModel):
     title: str = Field(max_length=60)
     kind: Literal["experience", "education", "projects", "skills", "text"]
     entries: list[Entry] = Field(default_factory=list, max_length=30)
-    text: str = Field(default="", max_length=2000)  # skills/summary line
+    # Skills, summary, or a whole section of plain lines: publications or awards ran past 2000 and the copy of that resume was refused.
+    text: str = Field(default="", max_length=8000)
     include: bool = True
 
 

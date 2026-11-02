@@ -298,6 +298,7 @@ function SetupPath({ data, name, refresh }: { data: MasterStatus; name?: string;
             <p>
               <b>{pct(v.coverage)}</b> of {v.source_words ?? "its"} words match
               {v.added_ratio ? `, ${pct(v.added_ratio)} added` : ""}.
+              {!!v.picture_pages?.length && ` Page ${v.picture_pages.join(", ")} of your PDF is a picture, so its words aren't in this copy.`}
               {v.render_fill && v.source_fill && (
                 <>
                   {" "}
@@ -601,11 +602,13 @@ function AddResume({ file, setFile }: { file: File | null; setFile: (f: File | n
     void run(
       "upload",
       async () => {
-        await api("/resumes", "POST", form);
+        const added = await api<{ warnings?: string[] }>("/resumes", "POST", form);
         setFile(null);
         await refresh();
+        return added;
       },
-      "Resume added.",
+      // What it couldn't read of the file (a page that is a picture, a very long resume) is the person's to know.
+      (added) => ["Resume added.", ...(added?.warnings ?? [])].join(" "),
     );
   };
   return (

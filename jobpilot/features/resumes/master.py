@@ -17,17 +17,21 @@ a draft, and applications keep using the original PDF.
 
 import io
 import json
+import logging
 import re
+import unicodedata
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError, field_validator
 from sqlalchemy import select
 
 from .._store import new_id, now
 from .editor import ResumeDoc, Style
 from .tables import RsMaster
+
+log = logging.getLogger(__name__)
 
 # Hyphens split words: PDF extraction breaks "exactly-once" across lines as "exactly-" / "once".
 TOKEN = re.compile(r"[a-z0-9][a-z0-9+#.%/&']*", re.I)
@@ -57,9 +61,59 @@ class Imported(BaseModel):
     contact: list[str] = Field(default_factory=list)
     sections: list[dict] = Field(default_factory=list)
 
+    # A whole resume's copy can come back with one item as a bare string or null: that is the same words, not a reason to throw them away.
+    @field_validator("name", mode="before")
+    @classmethod
+    def _name(cls, value):
+        return "" if value is None else value
+
+    @field_validator("contact", mode="before")
+    @classmethod
+    def _contact(cls, value):
+        if value is None:
+            return []
+        return [value] if isinstance(value, str) else [str(x) for x in value if x]
+
+
+# The longest resume text a copy can hold: the reply carries every word again plus about a fifth in JSON, inside its 9000 tokens
+# (knowledge/writing.py LONG_REPLIES). Longer than this it would be cut off, after paying for it twice, so it is refused first.
+IMPORT_TEXT_LIMIT = 25000
+
+
+class ResumeTooLong(ValueError):
+    """Too long to copy word for word: the words a person reads."""
+
+
+def unread_words(exc) -> str:
+    """Why the AI's reading of a resume can't be used, for a person, whatever the provider did; a bare timeout has no words of its own."""
+    from ...models import AnswerModelConnectionError, AnswerModelTimeout
+
+    if AnswerModelTimeout.caused_by(exc) or type(exc).__name__ in {"TimeoutError", "ReadTimeout"}:
+        return "The AI took too long to read your resume. Try again in a minute."
+    if AnswerModelConnectionError.caused_by(exc):
+        return "AXIOM could not reach your AI provider. Check the internet connection and your key, then try again."
+    return "The AI's reading of your resume came back cut off or unusable. Try again."
+
+
+def different_words(verification: dict) -> str:
+    """What differs between a stored copy and the PDF, in the words a person reads when tailoring stops for it."""
+    words = []
+    if pictures := verification.get("picture_pages"):
+        pages = ", ".join(str(n) for n in pictures)
+        words.append(f"{'page' if len(pictures) == 1 else 'pages'} {pages} of it {'is a picture' if len(pictures) == 1 else 'are pictures'}, so AXIOM couldn't read the words there")
+    if (verification.get("coverage") or 0) < 0.985:
+        missing = ", ".join((verification.get("missing") or [])[:6])
+        words.append(f"{int((verification.get('coverage') or 0) * 100)}% of its words came through" + (f", and it is missing {missing}" if missing else ""))
+    if (verification.get("added_ratio") or 0) > 0.015:
+        added = ", ".join((verification.get("added") or [])[:6])
+        words.append("it has words your PDF doesn't" + (f", such as {added}" if added else ""))
+    return "AXIOM's copy of your resume doesn't match your PDF: " + (" and ".join(words) or "it was never checked word for word") + "."
+
 
 def tokens(text: str) -> Counter:
-    return Counter(t.lower().strip(".,;:'") for t in TOKEN.findall(text or "") if t.strip(".,;:'"))
+    # NFKC: a PDF often writes the ligature "ﬁ" as one character, and the copy writes "fi".
+    text = unicodedata.normalize("NFKC", text or "")
+    return Counter(t.lower().strip(".,;:'") for t in TOKEN.findall(text) if t.strip(".,;:'"))
 
 
 def doc_text(doc: ResumeDoc) -> str:
@@ -73,11 +127,43 @@ def doc_text(doc: ResumeDoc) -> str:
     return "\n".join(p for p in parts if p)
 
 
+def _spelled_by(word: str, pieces: Counter) -> bool:
+    """Whether some of these words, end to end, spell this one exactly. Takes the ones it uses out of `pieces`."""
+    tries = [2000]  # A real word settles in a few steps; no resume may keep the event loop here.
+
+    def walk(at: int) -> bool:
+        if at == len(word):
+            return True
+        for end in range(len(word), at, -1):
+            tries[0] -= 1
+            if tries[0] < 0:
+                return False
+            piece = word[at:end]
+            if pieces[piece] > 0:
+                pieces[piece] -= 1
+                if walk(end):
+                    return True
+                pieces[piece] += 1
+        return False
+
+    return walk(0)
+
+
+def _apart_from_gaps(missing: Counter, added: Counter) -> tuple[Counter, Counter]:
+    """What still differs once gaps are set aside. Reading a PDF decides where gaps fall ("SUMMAR Y", "experi-" / "ence", "builtindexing"),
+    and the same PDF read two ways disagrees about them: the person wrote the same letters either way, so that isn't a difference."""
+    missing, added = Counter(missing), Counter(added)
+    for whole, pieces in ((added, missing), (missing, added)):
+        for word in sorted(whole, key=len, reverse=True):
+            while whole[word] > 0 and _spelled_by(word, pieces):
+                whole[word] -= 1
+    return +missing, +added
+
+
 def verify(source_text: str, doc: ResumeDoc) -> dict:
     """Word-level fidelity of a document against the source PDF text."""
     src, out = tokens(source_text), tokens(doc_text(doc))
-    missing = src - out
-    added = out - src
+    missing, added = _apart_from_gaps(src - out, out - src)
     total = sum(src.values()) or 1
     coverage = 1 - sum(missing.values()) / total
     extra = sum(added.values()) / total
@@ -136,6 +222,60 @@ def source_pdf(db, config, resume_id: str | None = None):
     return info, (path.read_bytes() if path.is_file() else None)
 
 
+def one_word_per_line(text: str) -> bool:
+    """Some PDFs place each word on its own baseline, a LaTeX resume among them: read plainly they come out one word per line."""
+    lines = [line for line in (text or "").splitlines() if line.strip()]
+    return len(lines) >= 30 and len((text or "").split()) / len(lines) < 2.5
+
+
+def _rebuilt_lines(reader) -> str:
+    """The page's lines, from where each piece of text sits on it."""
+    pages = []
+    for page in reader.pages:
+        pieces = []
+
+        def visit(text, cm, tm, _font, _size):
+            if text and text.strip():
+                pieces.append((tm[4] * cm[1] + tm[5] * cm[3] + cm[5], tm[4] * cm[0] + tm[5] * cm[2] + cm[4], " ".join(text.split())))
+
+        page.extract_text(visitor_text=visit)
+        lines: list[list] = []
+        for piece in sorted(pieces, key=lambda p: -p[0]):
+            # A baseline can wander by a fraction of the type size inside one line of text.
+            if lines and abs(lines[-1][0][0] - piece[0]) <= 2.5:
+                lines[-1].append(piece)
+            else:
+                lines.append([piece])
+        pages.append("\n".join(" ".join(p[2] for p in sorted(line, key=lambda p: p[1])) for line in lines))
+    return "\n".join(pages)
+
+
+def readable_text(reader) -> str:
+    """A PDF's words with lines a reader can follow. Everything downstream reads this: one word per line loses where a job or a bullet ends."""
+    plain = "\n".join(page.extract_text() or "" for page in reader.pages)
+    if one_word_per_line(plain):
+        return _rebuilt_lines(reader) or plain
+    return plain
+
+
+def _side_by_side(layout: str) -> bool:
+    """Most lines have a wide gap in the middle. In one column only the lines with dates at the right do."""
+    lines = [line.strip() for line in layout.splitlines() if line.strip()]
+    return len(lines) >= 10 and sum(bool(re.search(r"\S {4,}\S", line)) for line in lines) > 0.5 * len(lines)
+
+
+def picture_pages(reader) -> list[int]:
+    """Pages that hold an image and almost no words: a scan, with at most a scanner's footer on it. Numbered from 1."""
+    pages = []
+    for number, page in enumerate(reader.pages, 1):
+        try:
+            if len((page.extract_text() or "").split()) < 25 and len(page.images) > 0:
+                pages.append(number)
+        except Exception:  # A page pypdf can't look into is judged by the words read from the whole file.
+            continue
+    return pages
+
+
 def layout_text(pdf: bytes | None, fallback: str) -> str:
     if not pdf:
         return fallback
@@ -143,13 +283,38 @@ def layout_text(pdf: bytes | None, fallback: str) -> str:
 
     try:
         reader = PdfReader(io.BytesIO(pdf))
-        return "\n".join(p.extract_text(extraction_mode="layout") or "" for p in reader.pages)
+        # The layout reading glues words together on those same PDFs ("builtindexing"), so it isn't what the model reads there.
+        plain = "\n".join(p.extract_text() or "" for p in reader.pages)
+        if one_word_per_line(plain):
+            return _rebuilt_lines(reader) or fallback
+        layout = "\n".join(p.extract_text(extraction_mode="layout") or "" for p in reader.pages)
+        # Two columns side by side read across each other in the layout reading; the plain one gives each column whole.
+        return plain if _side_by_side(layout) else layout
     except Exception:
         return fallback
 
 
+def _words(value) -> str:
+    """A field of the model's copy as text: null is empty, a list is its lines (never Python's "['a', 'b']" on a resume)."""
+    if value is None:
+        return ""
+    if isinstance(value, (list, tuple)):
+        return "\n".join(_words(item) for item in value)
+    return str(value)
+
+
 def _normalize(imported: Imported) -> ResumeDoc:
     sections = []
+    used: set[str] = set()
+
+    def own_id(wanted, place: str) -> str:
+        # Every later step finds a bullet by its id: two bullets called "b1" would be compared with each other's words.
+        name = str(wanted or place)
+        if name in used:
+            name = place
+        used.add(name)
+        return name
+
     for i, s in enumerate(imported.sections):
         kind = (
             s.get("kind")
@@ -158,39 +323,45 @@ def _normalize(imported: Imported) -> ResumeDoc:
         )
         entries = []
         for j, e in enumerate(s.get("entries") or []):
-            bullets = [
-                {
-                    "id": b.get("id") or f"s{i}-e{j}-b{k}",
-                    "text": str(b.get("text", "")),
-                    "unit_id": None,
-                    "source_text": str(b.get("text", "")),
-                    "include": True,
-                }
-                for k, b in enumerate(e.get("bullets") or [])
-                if str(b.get("text", "")).strip()
-            ]
+            # An entry or a bullet written as a bare string is still those words.
+            e = e if isinstance(e, dict) else {"heading": e}
+            bullets = []
+            for k, b in enumerate(e.get("bullets") or []):
+                b = b if isinstance(b, dict) else {"text": b}
+                text = _words(b.get("text"))
+                if text.strip():
+                    bullets.append({"id": own_id(b.get("id"), f"s{i}-e{j}-b{k}"), "text": text, "unit_id": None, "source_text": text, "include": True})
             entries.append(
                 {
-                    "id": e.get("id") or f"s{i}-e{j}",
-                    "heading": str(e.get("heading", "")),
-                    "subheading": str(e.get("subheading", "")),
-                    "dates": str(e.get("dates", "")),
-                    "location": str(e.get("location", "")),
+                    "id": own_id(e.get("id"), f"s{i}-e{j}"),
+                    "heading": _words(e.get("heading")),
+                    "subheading": _words(e.get("subheading")),
+                    "dates": _words(e.get("dates")),
+                    "location": _words(e.get("location")),
                     "bullets": bullets,
                 }
             )
         sections.append(
             {
-                "id": s.get("id") or f"s{i}",
-                "title": str(s.get("title", "")),
+                "id": own_id(s.get("id"), f"s{i}"),
+                "title": _words(s.get("title")),
                 "kind": kind,
                 "entries": entries,
-                "text": str(s.get("text", "")),
+                "text": _words(s.get("text")),
             }
         )
-    return ResumeDoc.model_validate(
-        {"name": imported.name, "contact": imported.contact, "sections": sections}
-    )
+    # A contact line split into more items than a header holds is still those words: the rest share the last item.
+    contact = imported.contact if len(imported.contact) <= 8 else [*imported.contact[:7], " | ".join(imported.contact[7:])]
+    try:
+        return ResumeDoc.model_validate({"name": imported.name, "contact": contact, "sections": sections})
+    except ValidationError as exc:
+        # The validator's own text ("List should have at most...") is no use to a person. Which part, in their resume's words, is.
+        where = next((e["loc"] for e in exc.errors()), ())
+        title = sections[where[1]]["title"] if len(where) > 1 and where[0] == "sections" and isinstance(where[1], int) and where[1] < len(sections) else ""
+        raise ResumeTooLong(
+            f"Part of your resume{f', under {title},' if title else ''} is longer than AXIOM's copy of a resume can hold, so it can't be copied word for word. "
+            "Add a shorter version in Resumes, or use plain Apply, which sends your PDF as it is."
+        ) from None
 
 
 def current_master(db, approved_only=False) -> RsMaster | None:
@@ -243,8 +414,14 @@ async def import_master(db, config, model, resume_id: str | None = None) -> dict
     source, pdf = source_pdf(db, config, resume_id)
     if not source:
         raise ValueError("Upload your master resume first")
-    text = layout_text(pdf, source["text"])
-    imported = await model(Imported, IMPORT_SYSTEM, json.dumps({"resume_text": text[:30000]}))
+    # Layout pads columns with spaces, and a copy keeps none of them: the room goes to the words.
+    text = re.sub(r" {3,}", "  ", layout_text(pdf, source["text"]))
+    if len(text) > IMPORT_TEXT_LIMIT:
+        raise ResumeTooLong(
+            f"Your resume is too long for AXIOM to copy word for word: about {len(text.split())} words, and it can copy about "
+            f"{IMPORT_TEXT_LIMIT // 700 * 100}. Add a shorter version in Resumes, or use plain Apply, which sends your PDF as it is."
+        )
+    imported = await model(Imported, IMPORT_SYSTEM, json.dumps({"resume_text": text}))
     doc = _normalize(imported)
     style = Style(
         template="modern",
@@ -257,8 +434,16 @@ async def import_master(db, config, model, resume_id: str | None = None) -> dict
         margin_bottom=0.45,
     )
     verification = verify(source["text"] or text, doc)
-    if pdf:
-        verification["source_fill"] = measure_fill(pdf)
+    try:
+        if pdf:
+            verification["source_fill"] = measure_fill(pdf)
+            from pypdf import PdfReader
+
+            # Every word it could read came through, and a whole page of the resume is missing all the same.
+            if pictures := picture_pages(PdfReader(io.BytesIO(pdf))):
+                verification.update(picture_pages=pictures, faithful=False)
+    except Exception:  # How full a page looks is a nicety: the copy is already paid for and checked word by word.
+        log.info("couldn't measure the source resume's page")
     compiled = await compile_pdf(render(doc, style), timeout=30)
     if compiled.ok:
         verification["render_fill"] = measure_fill(compiled.pdf)

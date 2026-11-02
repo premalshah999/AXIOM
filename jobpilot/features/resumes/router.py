@@ -8,7 +8,7 @@ from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from sqlalchemy import func, select
 
 from . import editor, evidence, pipeline
@@ -404,8 +404,12 @@ def router(service) -> APIRouter:
 
         try:
             return await master_mod.import_master(db, config, configured_model(db, config))
+        except ValidationError as exc:  # A reply that fails its schema is a ValueError too, and its text is no use to a person.
+            raise HTTPException(409, master_mod.unread_words(exc)) from None
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from None
+        except Exception as exc:  # Cut off or refused by the provider: words a person can act on, not the library's.
+            raise HTTPException(409, master_mod.unread_words(exc)) from None
 
     @r.put("/master")
     async def master_save(data: MasterSave):

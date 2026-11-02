@@ -37,6 +37,13 @@ export function cityState(location: string) {
   return null;
 }
 
+// What a resume read adds beyond the profile's fields. The notice says when a long resume was read only in part.
+export type Extract = Partial<Draft> & { projects?: { name: string; description: string }[]; notice?: string };
+
+/** A resume's projects as the notes Profile shows under Work: "Project: name", then its bullets, which is how tailoring reads them (evidence.py). */
+const projectNotes = (x: Extract | null) =>
+  (x?.projects ?? []).filter((p) => p.name?.trim()).map((p) => `Project: ${p.name.trim()}\n${(p.description || "").trim()}`.trim());
+
 const asRead = (x: Partial<Draft>) => ({ ...x, ...splitPhone(x.phone || ""), place: cityState(x.location || "") });
 const sameEntry = (a: object, b: object) => JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort());
 /** Nothing in this list but what the last resume read put there (some may have been removed since), so a new read may replace it. */
@@ -47,11 +54,22 @@ export const onlyFromRead = <T extends object>(list: T[], read?: T[]) => list.ev
  * `last` is the server's memory of that read (POST /profile/extract), so choosing another resume replaces the first one's jobs and
  * schools rather than leaving them under a message saying the new ones were found, also after the guide was closed and reopened.
  */
-export function mergeExtract(draft: Draft, raw: Partial<Draft>, last: Partial<Draft> | null): Draft {
+export function mergeExtract(draft: Draft, raw: Extract, last: Extract | null): Draft {
   const x = asRead(raw);
   const before = last ? asRead(last) : null;
   const ours = (now: unknown, was: unknown) => !String(now ?? "").trim() || (!!before && String(now ?? "") === String(was ?? ""));
   const next = { ...draft };
+  // The same replace-unless-edited as work and schooling below.
+  const stale = new Set(projectNotes(last));
+  const keptNotes = (next.evidence || []).filter((e) => !stale.has(e.text));
+  const used = new Set(keptNotes.map((e) => e.id));
+  next.evidence = [...keptNotes];
+  for (const text of projectNotes(raw).filter((note) => !keptNotes.some((e) => e.text === note))) {
+    let n = 1;
+    while (used.has(`resume-project-${n}`)) n += 1;
+    used.add(`resume-project-${n}`);
+    next.evidence.push({ id: `resume-project-${n}`, text });
+  }
   for (const key of ["first_name", "last_name", "email", "phone", "location", "linkedin", "github", "website"] as const)
     if (x[key] && ours(next[key], before?.[key])) next[key] = x[key] as string;
   if (x.code && next.phone === x.phone) next.phone_country_code = x.code;

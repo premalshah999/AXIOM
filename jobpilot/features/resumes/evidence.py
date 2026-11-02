@@ -118,7 +118,7 @@ def build(profile: dict, resume_text: str = "") -> Inventory:
         education.append({**row, "row": rid})
     for note in profile.get("evidence") or []:
         text = (note or {}).get("text", "")
-        m = re.match(r"\s*project\s*[:\-]\s*([^.\n]+)[.\n]?\s*(.*)$", text, re.I | re.S)
+        m = re.match(r"\s*project\s*[:\-]\s*(.+?)(?:\.(?=\s)|\n|$)\s*(.*)$", text, re.I | re.S)  # "Node.js Tracker" is one name.
         if not m:
             continue
         nid = note.get("id") or digest(text)[:10]

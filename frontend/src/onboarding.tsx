@@ -8,7 +8,7 @@ import { resumeFileRefusal } from "./format";
 import { SwitchRow } from "./setup-kit";
 import { MainPassword } from "./mainpassword";
 import { span } from "./profile-fields";
-import { mergeExtract, onlyFromRead } from "./resumeread";
+import { type Extract, mergeExtract, onlyFromRead } from "./resumeread";
 import { YesNo } from "./qform";
 import { Button, Dropzone, ErrorLine, External, Input, Loading, Monogram, Pill, Segmented, Select } from "./ui/index";
 import type { EducationEntry, Profile, WorkEntry } from "./types";
@@ -274,12 +274,15 @@ function Tags({
   placeholder,
   label,
   suggestions = [],
+  commaAdds = true,
 }: {
   values: string[];
   onChange: (v: string[]) => void;
   placeholder: string;
   label: string;
   suggestions?: string[];
+  /** A place is written "Austin, TX": there a comma is part of the name. */
+  commaAdds?: boolean;
 }) {
   const [text, setText] = useState("");
   const add = (v: string) => {
@@ -296,7 +299,7 @@ function Tags({
         placeholder={placeholder}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === ",") {
+          if (e.key === "Enter" || (commaAdds && e.key === ",")) {
             e.preventDefault();
             add(text);
           }
@@ -493,6 +496,14 @@ export function Onboarding({ onDone, onExit }: { onDone: () => void; onExit: () 
     // The setup guide is its own scroll region (.ax-screen); the document never scrolls.
     document.querySelector(".ax-screen")?.scrollTo({ top: 0 });
   }, []);
+  // Whether a resume is on file: "I'll type it instead" leaves none, and applications can't start without one.
+  const [haveResume, setHaveResume] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (STEPS[at]?.id === "ready")
+      api<{ id: string }[]>("/resumes")
+        .then((list) => setHaveResume(list.length > 0))
+        .catch(() => setHaveResume(null));
+  }, [at]);
   // Move focus to the new step's title so keyboard and screen-reader users land on it.
   useEffect(() => {
     if (draft) heading.current?.focus({ preventScroll: true });
@@ -567,9 +578,8 @@ export function Onboarding({ onDone, onExit }: { onDone: () => void; onExit: () 
         dirty.current = false;
       }
       if (submit && submit.value !== submit.saved) {
-        // Read the current controls right before writing them back (Pause may have changed).
-        const fresh = await api<{ paused: boolean; auto_submit: boolean }>("/control");
-        await api("/control", "PUT", { ...fresh, auto_submit: submit.value });
+        // Only this switch: writing back `paused: false` counts as pressing Resume, which delivers every queued run again.
+        await api("/control", "PUT", { auto_submit: submit.value });
         setSubmit({ saved: submit.value, value: submit.value });
       }
       const state = await api<{ questionnaires?: { modules: Summary } }>("/onboarding", "PUT", {
@@ -592,7 +602,7 @@ export function Onboarding({ onDone, onExit }: { onDone: () => void; onExit: () 
   const finishAt = () => persist(at, true, () => window.location.assign(routeUrl({ view: "profile", tab: "knowledge" })));
   const hello = (account.name || "").trim().split(/\s+/)[0];
   // The finish says "ready" only when nothing AXIOM needs is missing.
-  const lines = last ? readyLines(draft, submit?.value ?? null, linked) : [];
+  const lines = last ? readyLines(draft, submit?.value ?? null, linked, haveResume) : [];
   const unfinished = lines.filter((l) => !l.ok && !l.optional).length;
   const title = current.id === "welcome" && hello ? `Welcome, ${hello}` : last && unfinished ? "Almost ready" : current.title;
   const lead = last && unfinished ? "Your profile is saved. You can finish the rest here, or any time later, then press Start on the next screen." : current.lead;
@@ -784,6 +794,8 @@ function ResumeStep({
   const [file, setFile] = useState<File | null>(null);
   const [state, setState] = useState<"idle" | "uploading" | "reading" | "done" | "error">("idle");
   const [message, setMessage] = useState("");
+  // What AXIOM couldn't read of this file (a page that is a picture, a very long resume), said beside what it did find.
+  const [cautions, setCautions] = useState<string[]>([]);
   // The resume a failed read can be tried on again, without choosing the file again.
   const [readId, setReadId] = useState("");
 
@@ -798,22 +810,29 @@ function ResumeStep({
     try {
       // Applications attach the newest resume unless a job chose another; picking one here makes it that one.
       await api(`/resumes/${encodeURIComponent(resumeId)}/prefer`, "POST").catch(() => null);
-      const { previous, ...extracted } = await api<Partial<Draft> & { previous?: Partial<Draft> | null }>("/profile/extract?resume_id=" + encodeURIComponent(resumeId), "POST");
+      const { previous, ...extracted } = await api<Extract & { previous?: Extract | null }>("/profile/extract?resume_id=" + encodeURIComponent(resumeId), "POST");
       const before = previous ?? null;
       const kept = !onlyFromRead(draft.work, before?.work) || !onlyFromRead(draft.education, before?.education);
       setDraft((d) => mergeExtract(d, extracted, before));
-      setState("done");
       const parts = [
         extracted.work?.length ? `${extracted.work.length} role${extracted.work.length === 1 ? "" : "s"}` : "",
         extracted.education?.length ? `${extracted.education.length} school${extracted.education.length === 1 ? "" : "s"}` : "",
+        extracted.projects?.length ? `${extracted.projects.length} project${extracted.projects.length === 1 ? "" : "s"}` : "",
         extracted.skills?.length ? `${extracted.skills.length} skill${extracted.skills.length === 1 ? "" : "s"}` : "",
       ].filter(Boolean);
+      if (extracted.notice) setCautions((list) => [...list, extracted.notice!]);
       const after = kept
         ? " Your own entries below stay. Remove them and read the resume again to use what it lists."
         : extracted.work?.length || extracted.education?.length
           ? " Check them below."
           : " No jobs or schools were found in it. You can add them in Profile after setup.";
-      setMessage(parts.length ? "Found " + parts.join(", ") + "." + after : "Resume read, but nothing was found in it. You can add your details in Profile after setup.");
+      // Read, and nothing in it: not a success, and the person has to know that before they rely on it.
+      setState(parts.length ? "done" : "error");
+      setMessage(
+        parts.length
+          ? "Found " + parts.join(", ") + "." + after
+          : "AXIOM read this PDF and found no jobs, schools or skills in it. Employers would still get this file as it is. Try another copy of your resume, or type your details instead.",
+      );
     } catch (e) {
       setState("error");
       // The server's words for a missing key name a settings file; here the fix is one step back.
@@ -828,6 +847,7 @@ function ResumeStep({
 
   async function upload(chosen: File) {
     setFile(chosen);
+    setCautions([]);
     setState("uploading");
     setMessage("Uploading…");
     const form = new FormData();
@@ -836,10 +856,13 @@ function ResumeStep({
     form.append("roles", "");
     try {
       // ?reuse: the same file again (after a failed read, or a guide closed half way) is that resume, not a mistake.
-      const row = await api<{ id: string; name: string }>("/resumes?reuse=1", "POST", form);
+      const row = await api<{ id: string; name: string; warnings?: string[] }>("/resumes?reuse=1", "POST", form);
       setResumes((list) => [row, ...(list || []).filter((r) => r.id !== row.id)]);
+      setCautions(row.warnings ?? []);
       await read(row.id);
     } catch (e) {
+      // Refused: the drop area is ready for another file at once, and the words stay.
+      setFile(null);
       setReadId("");
       setState("error");
       setMessage((e as Error).message);
@@ -847,7 +870,9 @@ function ResumeStep({
   }
 
   const busy = state === "uploading" || state === "reading";
-  const found = draft.work.length > 0 || draft.education.length > 0;
+  // The notes a resume's projects became: the person checks these with the rest.
+  const projects = (draft.evidence || []).filter((e) => e.id.startsWith("resume-project-"));
+  const found = draft.work.length > 0 || draft.education.length > 0 || projects.length > 0 || draft.skills.length > 0;
   return (
     <>
       <Dropzone
@@ -856,6 +881,7 @@ function ResumeStep({
           if (f) upload(f);
           else {
             setFile(null);
+            setCautions([]);
             setState("idle");
             setMessage("");
           }
@@ -892,6 +918,12 @@ function ResumeStep({
           )}
         </p>
       )}
+      {!busy &&
+        cautions.map((c) => (
+          <p key={c} className="ax-error" role="alert">
+            {c}
+          </p>
+        ))}
       {!file && resumes && resumes.length > 0 && (
         <Section title="Or use one you've already added">
           <ul className="ax-rows" aria-label="Uploaded resumes">
@@ -900,7 +932,14 @@ function ResumeStep({
                 <span className="ax-row-main">
                   <strong>{r.name}</strong>
                 </span>
-                <Button size="sm" disabled={busy} onClick={() => read(r.id)}>
+                <Button
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => {
+                    setCautions([]);
+                    read(r.id);
+                  }}
+                >
                   Use this one
                 </Button>
               </li>
@@ -937,6 +976,30 @@ function ResumeStep({
                 </Button>
               </li>
             ))}
+            {projects.map((n) => {
+              const name = n.text.replace(/^Project:\s*/, "").split("\n")[0] || "Project";
+              return (
+                <li key={n.id}>
+                  <Monogram name={name} size="md" />
+                  <span className="ax-ob-found-text">
+                    <strong>{name}</strong>
+                    <small>Project</small>
+                  </span>
+                  <Button size="sm" variant="ghost" disabled={busy} onClick={() => setDraft((d) => ({ ...d, evidence: d.evidence.filter((x) => x.id !== n.id) }))}>
+                    Remove<span className="sr-only"> project {name}</span>
+                  </Button>
+                </li>
+              );
+            })}
+            {draft.skills.length > 0 && (
+              <li>
+                <Monogram name="Skills" size="md" />
+                <span className="ax-ob-found-text">
+                  <strong>Skills</strong>
+                  <small className="is-all">{draft.skills.join(", ")}</small>
+                </span>
+              </li>
+            )}
           </ul>
         </Section>
       )}
@@ -1120,6 +1183,7 @@ function PreferencesStep({ draft, setTop, setFact }: StepProps & { setTop: SetTo
           onChange={(v) => setTop("target_locations", v)}
           placeholder="City, state, or Remote"
           suggestions={anywhere ? ["Remote"] : ["Anywhere in the USA", "Remote"]}
+          commaAdds={false}
         />
         <div className="ax-ob-list">
           <Question label="Are you willing to relocate?">
@@ -1707,12 +1771,19 @@ function yesno(v: unknown) {
 type Line = { id: string; step: StepId; label: string; detail: string; ok: boolean; optional?: boolean };
 
 /** What the finish lists: each thing AXIOM will use, whether it is complete, and the step that fixes it. */
-function readyLines(draft: Draft, submit: boolean | null, linked: Linked): Line[] {
+function readyLines(draft: Draft, submit: boolean | null, linked: Linked, haveResume: boolean | null): Line[] {
   const f = foldFacts(draft.facts);
   const name = [draft.first_name, draft.last_name].filter(Boolean).join(" ");
   const authorized = yesno(f.work_authorization_us);
   const sponsor = yesno(f.requires_future_sponsorship_us);
   return [
+    {
+      id: "resume",
+      step: "resume",
+      label: "Resume",
+      detail: haveResume === false ? "Not added. Applications can't start without one." : haveResume ? "Added. Employers get this file as it is." : "Could not check.",
+      ok: haveResume !== false,
+    },
     {
       id: "contact",
       step: "profile",

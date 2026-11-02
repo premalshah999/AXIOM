@@ -532,6 +532,10 @@ button.ax-ob-choice:hover {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Every skill is there to be checked, so the list wraps. */
+.ax-ob-found small.is-all {
+  white-space: normal;
+}
 
 /* ---------- connections ---------- */
 .ax-ob-conn {
