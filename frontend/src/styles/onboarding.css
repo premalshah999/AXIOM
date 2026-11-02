@@ -514,8 +514,9 @@ button.ax-ob-choice:hover {
 .ax-ob-found li + li {
   border-top: 1px solid var(--line-soft);
 }
-.ax-ob-found li > span:last-child {
+.ax-ob-found .ax-ob-found-text {
   display: flex;
+  flex: 1;
   flex-direction: column;
   min-width: 0;
 }

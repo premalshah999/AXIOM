@@ -51,7 +51,7 @@ const STEPS: Step[] = [
     id: "resume",
     name: "Resume",
     title: "Start with your resume",
-    lead: "We read it once to fill in most of the next steps. You check everything before it is used.",
+    lead: "We read it once to fill in most of the next steps. Check what it found before you go on.",
     server: "resume",
     minutes: 0.75,
     skip: "I'll type it instead",
@@ -795,6 +795,13 @@ function WelcomeStep() {
   );
 }
 
+/** "2022-06 to now": how long a job or course ran, as the resume read it. */
+function span(start?: string, end?: string, current?: boolean) {
+  const from = (start || "").trim();
+  const to = current ? "now" : (end || "").trim();
+  return from && to ? `${from} to ${to}` : from ? `from ${from}` : to ? `to ${to}` : "";
+}
+
 // ---------- Resume ----------
 function ResumeStep({
   draft,
@@ -830,7 +837,7 @@ function ResumeStep({
         extracted.education?.length ? `${extracted.education.length} school${extracted.education.length === 1 ? "" : "s"}` : "",
         extracted.skills?.length ? `${extracted.skills.length} skills` : "",
       ].filter(Boolean);
-      setMessage(parts.length ? "Found " + parts.join(", ") + ". You'll check them on the next steps." : "Resume read.");
+      setMessage(parts.length ? "Found " + parts.join(", ") + ". Check them below." : "Resume read, but no jobs or schools were found in it. You can add them in Profile after setup.");
     } catch (e) {
       setState("error");
       // The server's words for a missing key name a settings file; here the fix is one step back.
@@ -926,27 +933,33 @@ function ResumeStep({
         </Section>
       )}
       {found && (
-        <Section title="What we found" hint="Edit any of it on the next steps.">
+        <Section title="What we found" hint="Remove anything that was read wrongly. You can edit the rest in Profile, under Work and education, after setup.">
           <ul className="ax-ob-found" aria-label="Found in your resume">
-            {draft.work.slice(0, 4).map((w, i) => (
+            {draft.work.map((w, i) => (
               <li key={"w" + i}>
                 <Monogram name={w.company} size="md" />
-                <span>
+                <span className="ax-ob-found-text">
                   <strong>{w.title || "Role"}</strong>
-                  <small>{w.company}</small>
+                  <small>{[w.company, span(w.start, w.end, w.current)].filter(Boolean).join(" · ")}</small>
                 </span>
+                <Button size="sm" variant="ghost" disabled={busy} onClick={() => setDraft((d) => ({ ...d, work: d.work.filter((_, k) => k !== i) }))}>
+                  Remove<span className="sr-only"> {w.title || "role"} at {w.company}</span>
+                </Button>
               </li>
             ))}
-            {draft.education.slice(0, 3).map((e, i) => (
+            {draft.education.map((e, i) => (
               <li key={"e" + i}>
                 <Monogram name={e.school} size="md" />
-                <span>
+                <span className="ax-ob-found-text">
                   <strong>
                     {e.degree}
                     {e.field_of_study ? " · " + e.field_of_study : ""}
                   </strong>
-                  <small>{e.school}</small>
+                  <small>{[e.school, span(e.start, e.end, false)].filter(Boolean).join(" · ")}</small>
                 </span>
+                <Button size="sm" variant="ghost" disabled={busy} onClick={() => setDraft((d) => ({ ...d, education: d.education.filter((_, k) => k !== i) }))}>
+                  Remove<span className="sr-only"> {e.degree || "school"} at {e.school}</span>
+                </Button>
               </li>
             ))}
           </ul>
