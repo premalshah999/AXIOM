@@ -177,7 +177,7 @@ export function ApplyOutcomes({
         {waits.size > 0 && (
           <p className="ax-note">
             {[...waits].map(([what, n]) => `${n} wait for ${what}`).join(" · ")}. They start on their own; follow them in
-            Pipeline.
+            the Queue.
           </p>
         )}
         {refused.length > 0 && (
