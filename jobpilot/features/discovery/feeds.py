@@ -819,12 +819,14 @@ async def sweep(db, window_days: int = 7) -> dict:
     from ...agent_settings import require
 
     require(db, "discovery")
-    from ...jobboard import keep_last_read
+    from ...jobboard import READ_DONE
 
     started = datetime.now(UTC).isoformat()
     previous = db.get_setting(SWEEP_KEY, {}) or {}
-    # What the last finished sweep proved (jobboard.unconfirmed) stands while this one runs and if it fails.
-    kept = keep_last_read(previous, {})
+    # What the last finished sweep proved (jobboard.unconfirmed) stands while this one runs and if it fails. A flag from before `read_at`
+    # existed has its own start; an empty one is a finished sweep that proved nothing.
+    last = previous.get("read_at", previous.get("started_at") if previous.get("state") in READ_DONE else None)
+    kept = {"read_at": last} if last is not None else {}
     db.set_setting(SWEEP_KEY, {**previous, "state": "running", "started_at": started, **kept})
     try:
         from ...schemas import Profile
@@ -861,8 +863,9 @@ async def sweep(db, window_days: int = 7) -> dict:
             company_harvest = await harvest_companies(db)  # Boards of the listed companies the postings never linked to.
         except Exception as exc:
             company_harvest = {"error": type(exc).__name__}
-        # A list that failed to load names nothing, so what it would have named has not been read without: the last read's proof stands.
-        whole = not any("error" in feed for feed in report["feeds"].values())
+        # A list that failed to load names nothing, and a shorter window than the board's leaves its older postings out: neither shows a
+        # posting is gone, so the last whole read's proof stands.
+        whole = not any("error" in feed for feed in report["feeds"].values()) and window_days * 24 >= int(board.get("max_age_hours") or 0)
         result = {
             "read_at": started if whole else kept.get("read_at", ""),
             "state": "done",

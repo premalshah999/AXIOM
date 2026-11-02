@@ -42,7 +42,7 @@ def test_a_listing_nobody_has_re_read_stays_open_for_a_while(service):
 def test_a_listing_its_board_was_read_without_is_not_open(service):
     with service.db.exclusive() as s:
         listing(s, "gone", 20, "s-gone")
-    service.db.set_setting("job_board_scan:s-gone", {"state": "complete", "started_at": HOURS_AGO(2), "finished_at": HOURS_AGO(1)})
+    service.db.set_setting("job_board_scan:s-gone", {"state": "complete", "started_at": HOURS_AGO(2), "finished_at": HOURS_AGO(1), "read_at": HOURS_AGO(2)})
     assert shown(service) == set()
 
 
@@ -50,7 +50,7 @@ def test_the_scan_that_last_saw_a_listing_does_not_close_it(service):
     """A scan stamps what it sees with its own start, and finishes later: its finish is not a read that missed the listing."""
     with service.db.exclusive() as s:
         listing(s, "own", 20, "s-own")
-    service.db.set_setting("job_board_scan:s-own", {"state": "complete", "started_at": HOURS_AGO(20), "finished_at": HOURS_AGO(19.9)})
+    service.db.set_setting("job_board_scan:s-own", {"state": "complete", "started_at": HOURS_AGO(20), "finished_at": HOURS_AGO(19.9), "read_at": HOURS_AGO(20)})
     assert shown(service) == {"ExampleSoft/own"}
 
 
@@ -65,7 +65,7 @@ def test_another_boards_scan_does_not_close_this_one(service):
     with service.db.exclusive() as s:
         listing(s, "quiet", 20, "s-quiet")
         listing(s, "busy", 1, "s-busy")
-    service.db.set_setting("job_board_scan:s-busy", {"state": "complete", "started_at": HOURS_AGO(1), "finished_at": HOURS_AGO(0.5)})
+    service.db.set_setting("job_board_scan:s-busy", {"state": "complete", "started_at": HOURS_AGO(1), "finished_at": HOURS_AGO(0.5), "read_at": HOURS_AGO(1)})
     assert shown(service) == {"ExampleSoft/quiet", "ExampleSoft/busy"}
 
 
@@ -89,7 +89,7 @@ def test_a_list_posting_the_latest_sweep_dropped_is_not_open_but_a_failed_sweep_
 def test_recently_seen_listings_are_open_whatever_the_scan_says(service):
     with service.db.exclusive() as s:
         listing(s, "fresh", 2, "s-fresh")
-    service.db.set_setting("job_board_scan:s-fresh", {"state": "complete", "started_at": HOURS_AGO(1), "finished_at": HOURS_AGO(0.5)})
+    service.db.set_setting("job_board_scan:s-fresh", {"state": "complete", "started_at": HOURS_AGO(1), "finished_at": HOURS_AGO(0.5), "read_at": HOURS_AGO(1)})
     assert shown(service) == {"ExampleSoft/fresh"}
 
 
@@ -97,7 +97,7 @@ def missed_by_a_finished_read(service, name):
     """A listing past the window whose own board was read to the end without it."""
     with service.db.exclusive() as s:
         listing(s, name, 20, "s-" + name)
-    service.db.set_setting("job_board_scan:s-" + name, {"state": "complete", "started_at": HOURS_AGO(2), "finished_at": HOURS_AGO(1.9)})
+    service.db.set_setting("job_board_scan:s-" + name, {"state": "complete", "started_at": HOURS_AGO(2), "finished_at": HOURS_AGO(1.9), "read_at": HOURS_AGO(2)})
     assert shown(service) == set()
 
 
@@ -126,11 +126,65 @@ def test_a_read_that_fails_after_a_finished_one_keeps_what_that_one_proved(servi
     assert shown(service) == set()
 
 
-def test_the_flag_a_finished_read_left_before_this_field_existed_counts(service):
-    """An installed app's flags have no `read_at` yet: the next flag takes their start, so updating does not bring anything back."""
-    assert keep_last_read({"state": "complete", "started_at": "T1"}, {"state": "queued"}) == {"state": "queued", "read_at": "T1"}
-    assert keep_last_read({"state": "error", "started_at": "T1"}, {"state": "queued"}) == {"state": "queued"}
+def test_a_scan_flag_from_before_this_field_existed_proves_nothing(service):
+    """It cannot say its read was whole. A whole-list board that dropped a listing has already marked it inactive, so nothing closed returns."""
+    with service.db.exclusive() as s:
+        listing(s, "older", 20, "s-older")
+    service.db.set_setting("job_board_scan:s-older", {"state": "complete", "started_at": HOURS_AGO(2), "finished_at": HOURS_AGO(1)})
+    assert shown(service) == {"ExampleSoft/older"}
+    assert keep_last_read({"state": "complete", "started_at": "T1"}, {"state": "queued"}) == {"state": "queued"}
     assert keep_last_read({"state": "queued", "started_at": "T2", "read_at": "T1"}, {"state": "running"}) == {"state": "running", "read_at": "T1"}
+
+
+def test_a_search_of_a_board_that_did_not_return_a_listing_does_not_hide_it(service, config, monkeypatch):
+    """The real Workday read: searches, so `complete` is False. 696 of 2,140 Workday listings were hidden by searches that merely missed them."""
+    with service.db.exclusive() as s:
+        listing(s, "searched", 20, "s-workday", kind="workday")
+    service.db.set_setting("profile", {"target_roles": ["Software Engineer"]})
+    source = {"id": "s-workday", "name": "Example", "kind": "workday", "url": "https://example.wd1.myworkdayjobs.com/External"}
+
+    async def nothing_found(url, **_k):
+        return '{"jobPostings": [], "total": 0}', url
+
+    monkeypatch.setattr("jobpilot.jobboard.fetch", nothing_found)
+    asyncio.run(scrape_source(source, service.db, config))
+    flag = service.db.get_setting("job_board_scan:s-workday", {})
+    assert flag["state"] == "complete" and "read_at" not in flag
+    assert shown(service) == {"ExampleSoft/searched"}
+
+
+def test_a_read_of_the_whole_board_without_a_listing_does_hide_it(service, config, monkeypatch):
+    with service.db.exclusive() as s:
+        listing(s, "dropped", 20, "s-whole")
+    service.db.set_setting("profile", {"target_roles": ["Software Engineer"]})
+    source = {"id": "s-whole", "name": "Example", "kind": "greenhouse", "url": "https://job-boards.greenhouse.io/example"}
+
+    async def empty_board(url, **_k):
+        return '{"jobs": []}', url
+
+    monkeypatch.setattr("jobpilot.jobboard.fetch", empty_board)
+    asyncio.run(scrape_source(source, service.db, config))
+    assert service.db.get_setting("job_board_scan:s-whole", {})["read_at"]
+    assert shown(service) == set()
+
+
+def test_a_sweep_with_a_shorter_window_than_the_board_proves_nothing(service, monkeypatch):
+    with service.db.exclusive() as s:
+        listing(s, "older", 20, "feed:new-grad")
+    service.db.set_setting("job_board_settings", {"enabled": True, "max_age_hours": 720})
+
+    async def read_it_all(*_a, **_k):
+        return [], {"kept": 0, "feeds": {"a": {"rows": 3}}, "boards": {"swept": 0}, "only_from_board_sweep": 0}
+
+    monkeypatch.setattr("jobpilot.features.discovery.feeds.collect", read_it_all)
+    monkeypatch.setattr("jobpilot.agent_settings.require", lambda *_a, **_k: None)
+    monkeypatch.setattr("jobpilot.features.discovery.feeds.harvest_boards", _nothing)
+    monkeypatch.setattr("jobpilot.features.discovery.companies.harvest_companies", _nothing)
+    monkeypatch.setattr("jobpilot.features.discovery.postings.fill_missing_text", _nothing)
+    assert asyncio.run(sweep(service.db, 7))["state"] == "done"
+    assert shown(service) == {"ExampleSoft/older"}
+    assert asyncio.run(sweep(service.db, 30))["state"] == "done"
+    assert shown(service) == set()
 
 
 def test_scrape_source_keeps_and_renews_the_last_read(service, config, monkeypatch):
@@ -138,7 +192,7 @@ def test_scrape_source_keeps_and_renews_the_last_read(service, config, monkeypat
         s.add(Source(id="s-real", name="Real", kind="greenhouse", url="https://example.test/real", cron="0 * * * *"))
     source = {"id": "s-real", "name": "Real", "kind": "greenhouse", "url": "https://example.test/real"}
     service.db.set_setting("profile", {"target_roles": ["Software Engineer"]})
-    service.db.set_setting("job_board_scan:s-real", {"state": "complete", "started_at": HOURS_AGO(9), "finished_at": HOURS_AGO(8.9)})
+    service.db.set_setting("job_board_scan:s-real", {"state": "complete", "started_at": HOURS_AGO(9), "finished_at": HOURS_AGO(8.9), "read_at": HOURS_AGO(9)})
 
     async def fails(*_a, **_k):
         raise RuntimeError("the board is down")
@@ -148,6 +202,14 @@ def test_scrape_source_keeps_and_renews_the_last_read(service, config, monkeypat
         asyncio.run(scrape_source(source, service.db, config))
     flag = service.db.get_setting("job_board_scan:s-real", {})
     assert flag["state"] == "error" and flag["read_at"] == HOURS_AGO(9)
+
+    async def part_of_it(*_a, **_k):
+        return [], set(), False, 0
+
+    monkeypatch.setattr("jobpilot.jobboard.read_feed", part_of_it)
+    asyncio.run(scrape_source(source, service.db, config))
+    flag = service.db.get_setting("job_board_scan:s-real", {})
+    assert flag["state"] == "complete" and flag["read_at"] == HOURS_AGO(9)
 
     async def reads(*_a, **_k):
         return [], set(), True, 0

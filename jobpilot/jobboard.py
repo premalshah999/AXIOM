@@ -934,13 +934,11 @@ READ_DONE = ("done", "complete")  # A board's scan and the new-grad sweep name a
 
 
 def keep_last_read(previous, flag):
-    """`flag` with the start of the last read that finished (`read_at`), taken from the `previous` flag it replaces.
+    """`flag` with the start of the last read that took in the whole board (`read_at`), taken from the `previous` flag it replaces.
 
-    What a finished read proved must outlive the flag: each search rewrites every board's flag to "queued", and a read may then fail,
+    What such a read proved must outlive the flag: each search rewrites every board's flag to "queued", and a read may then fail,
     and the board brought back every listing that read had missed, for a whole scan round or until the board answered again."""
-    previous = previous or {}
-    # A flag from before `read_at` existed has its own start. An empty `read_at` is a finished sweep that proved nothing (a list failed to load).
-    kept = previous["read_at"] if "read_at" in previous else previous.get("started_at") if previous.get("state") in READ_DONE else None
+    kept = (previous or {}).get("read_at")
     return {**flag, "read_at": kept} if kept is not None else flag
 
 
@@ -981,7 +979,11 @@ async def scrape_source(source, db, config):
         await asyncio.to_thread(
             db.set_setting, REJECTED + source["id"], {"fp": fingerprint, "since": since, "urls": sorted(kept)[:2000]}
         )
-        report.update(state="complete", finished_at=now(), new=len(created), read_at=at.isoformat())
+        if complete:
+            # Only a read of the whole board shows a listing is gone: Workday's searches and SmartRecruiters' recent postings name
+            # some of what is open (read_feed), so their absence says nothing (unconfirmed).
+            report["read_at"] = at.isoformat()
+        report.update(state="complete", finished_at=now(), new=len(created))
         await asyncio.to_thread(db.set_setting, key, report)
         return created
     except Exception as exc:
@@ -992,7 +994,7 @@ async def scrape_source(source, db, config):
         raise
 
 
-UNREAD_HOURS = 72  # Without any read at all, a listing older than this is no longer called open (the app has not looked in days).
+UNREAD_HOURS = 72  # With no read of its whole board, a listing not seen for this long is no longer called open (dozens of searches missed it, or the app has not looked in days).
 
 
 def seen_window_hours(interval_hours):
@@ -1005,20 +1007,24 @@ def unconfirmed(at, interval_hours):
     Not seen within the window is not enough: a Mac that sleeps, or a scan that works through thousands of boards over hours,
     leaves listings unread for longer than the window while nothing has found them gone, and the board read "No open postings"
     until the scans caught up (production 2026-11-02: 2,710 of 5,270 active listings were past a 6-hour cutoff). A listing is
-    gone when its own board, or the new-grad list, was read successfully after it was last seen and did not show it. Until
-    then it stays open, for at most UNREAD_HOURS."""
+    gone when its own whole board, or the new-grad list, was read successfully after it was last seen and did not show it. A partial
+    read proves nothing: Workday is searched, and 696 of 2,140 Workday listings were hidden by searches that merely did not return
+    them. Until then it stays open, for at most UNREAD_HOURS."""
     from .features.discovery.feeds import SWEEP_KEY
 
     seen = JobListing.last_seen
     # A read that STARTED after the listing was last seen and finished: a scan stamps what it sees with its own start time, and the
     # new-grad sweep stamps during its run, so a read's finish (or its own start) is never evidence about the listing it just saw.
-    # `read_at` survives the next read being queued, running or failed (keep_last_read); a flag written before it existed has its own start.
-    last_read = func.coalesce(
-        Setting.value["read_at"].as_string(),
-        case((Setting.value["state"].as_string().in_(READ_DONE), Setting.value["started_at"].as_string())),
+    # `read_at` survives the next read being queued, running or failed (keep_last_read). A scan flag from before it existed cannot say
+    # its read was whole, and proves nothing; a whole-list board that dropped a listing has already marked it inactive (persist_scan).
+    # A finished sweep read every list unless it says otherwise, so its older flag still counts.
+    read_at = Setting.value["read_at"].as_string()
+    sweep = (
+        select(func.coalesce(read_at, case((Setting.value["state"].as_string().in_(READ_DONE), Setting.value["started_at"].as_string()))))
+        .where(Setting.key == SWEEP_KEY)
+        .scalar_subquery()
     )
-    sweep = select(last_read).where(Setting.key == SWEEP_KEY).scalar_subquery()
-    scan = select(last_read).where(Setting.key == "job_board_scan:" + JobListing.source_id).correlate(JobListing).scalar_subquery()
+    scan = select(read_at).where(Setting.key == "job_board_scan:" + JobListing.source_id).correlate(JobListing).scalar_subquery()
     read_since = func.coalesce(case((JobListing.source_id.startswith("feed:", autoescape=True), sweep), else_=scan), "") > seen
     cutoff = (at - timedelta(hours=seen_window_hours(interval_hours))).isoformat()
     unread = (at - timedelta(hours=UNREAD_HOURS)).isoformat()
