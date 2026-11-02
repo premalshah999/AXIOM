@@ -5356,6 +5356,10 @@ class BrowserEngine:
                 return
             if await stop_if_sensitive(self, obs):
                 return
+            from .social_login_only import stop_if_social_login_only
+
+            if stop_if_social_login_only(self, obs):
+                return
             adapter = getattr(self, "fallback_mail_adapter", None)
             if adapter and not self.armed:
                 from .adapters.base import Step
