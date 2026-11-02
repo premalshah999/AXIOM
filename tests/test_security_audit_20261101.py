@@ -242,10 +242,10 @@ def test_copy_diagnostics_masks_a_password_with_no_tell_tale_word_or_shape(tmp_p
 
     data = tmp_path / "data"
     data.mkdir()
-    (data / "access-token").write_text("Synth-Window-Token-778899")
+    (data / "access-token").write_text("Synth-Window-Door-778899")
     cfg = SimpleNamespace(values={"APPLICATION_PASSWORD": "Zq9!Synth&Diag7", "TIMEZONE": "UTC"}, data_dir=data)
     desktop.remember_secrets(cfg)
-    text = desktop.scrub("the page said Zq9!Synth&Diag7 and Synth-Window-Token-778899 in UTC")
+    text = desktop.scrub("the page said Zq9!Synth&Diag7 and Synth-Window-Door-778899 in UTC")
     assert "Zq9" not in text and "Synth-Window" not in text and "in UTC" in text
 
 
