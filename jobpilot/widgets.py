@@ -1163,13 +1163,12 @@ async def period_picker(frame, el, value):
 
     if await shown() == wanted:
         return value
-    await host.scroll_into_view_if_needed(timeout=2000)
-    box = await host.bounding_box()
-    if not box:
-        raise ValueError("The period picker is no longer available")
-    page = frame.page
     for side, date in enumerate(wanted):
-        await page.mouse.click(box["x"] + box["width"] * (0.25 if side == 0 else 0.75), box["y"] + box["height"] / 2)
+        # A click checked by the browser: what's under the point must be the picker, never a sticky bar's Submit lying over it.
+        box = await host.bounding_box()
+        if not box:
+            raise ValueError("The period picker is no longer available")
+        await host.click(position={"x": box["width"] * (0.25 if side == 0 else 0.75), "y": box["height"] / 2}, timeout=4000)
         await asyncio.sleep(0.25)
         done = (
             await period_pick(frame, "open")
