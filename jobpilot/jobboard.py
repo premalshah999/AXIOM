@@ -987,13 +987,15 @@ def unconfirmed(at, interval_hours):
     from .features.discovery.feeds import SWEEP_KEY
 
     seen = JobListing.last_seen
+    # A read that STARTED after the listing was last seen and finished: a scan stamps what it sees with its own start time, and the
+    # new-grad sweep stamps during its run, so a read's finish (or its own start) is never evidence about the listing it just saw.
     sweep = (
-        select(Setting.value["finished_at"].as_string())
-        .where(Setting.key == SWEEP_KEY, Setting.value["state"].as_string() != "error")
+        select(Setting.value["started_at"].as_string())
+        .where(Setting.key == SWEEP_KEY, Setting.value["state"].as_string().in_(("done", "complete")))
         .scalar_subquery()
     )
     scan = (
-        select(Setting.value["finished_at"].as_string())
+        select(Setting.value["started_at"].as_string())
         .where(Setting.key == "job_board_scan:" + JobListing.source_id, Setting.value["state"].as_string() == "complete")
         .correlate(JobListing)
         .scalar_subquery()

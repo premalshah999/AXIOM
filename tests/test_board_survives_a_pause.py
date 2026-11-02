@@ -42,6 +42,14 @@ def test_a_listing_its_board_was_read_without_is_not_open(service):
     assert shown(service) == set()
 
 
+def test_the_scan_that_last_saw_a_listing_does_not_close_it(service):
+    """A scan stamps what it sees with its own start, and finishes later: its finish is not a read that missed the listing."""
+    with service.db.exclusive() as s:
+        listing(s, "own", 20, "s-own")
+    service.db.set_setting("job_board_scan:s-own", {"state": "complete", "started_at": HOURS_AGO(20), "finished_at": HOURS_AGO(19.9)})
+    assert shown(service) == {"ExampleSoft/own"}
+
+
 def test_a_scan_that_failed_proves_nothing(service):
     with service.db.exclusive() as s:
         listing(s, "failed", 20, "s-failed")
@@ -66,9 +74,11 @@ def test_a_listing_unread_for_three_days_is_not_called_open(service):
 def test_a_list_posting_the_latest_sweep_dropped_is_not_open_but_a_failed_sweep_proves_nothing(service):
     with service.db.exclusive() as s:
         listing(s, "dropped", 20, "feed:new-grad")
-    service.db.set_setting(SWEEP_KEY, {"state": "error", "finished_at": HOURS_AGO(1)})
+    service.db.set_setting(SWEEP_KEY, {"state": "error", "started_at": HOURS_AGO(2), "finished_at": HOURS_AGO(1)})
     assert shown(service) == {"ExampleSoft/dropped"}
-    service.db.set_setting(SWEEP_KEY, {"state": "complete", "finished_at": HOURS_AGO(1)})
+    service.db.set_setting(SWEEP_KEY, {"state": "running", "started_at": HOURS_AGO(0.2), "finished_at": HOURS_AGO(30)})
+    assert shown(service) == {"ExampleSoft/dropped"}  # a sweep under way has not said what it dropped
+    service.db.set_setting(SWEEP_KEY, {"state": "done", "started_at": HOURS_AGO(2), "finished_at": HOURS_AGO(1)})
     assert shown(service) == set()
 
 
