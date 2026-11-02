@@ -1,6 +1,6 @@
 # What `scripts/dev/gate.sh smoke` runs, with a browser or without one: one command that asks whether a change broke a guard or a
-# whole flow. `gate.sh release` runs the browser tests named here after its fast and gallery tiers, which have already run the rest.
-# The full browser run (`gate.sh browser`) is for changes to the engine and runs less often.
+# whole flow. It is not part of `gate.sh release` until it has had one clean run on a quiet Mac. The full browser run (`gate.sh browser`)
+# is for changes to the engine and runs less often.
 #
 # One entry per line: `file.py` is the whole file, `file.py::text` the tests whose name contains the text. Nothing here is removed
 # from the fast, gallery or full runs, and a guard is never dropped to make this fast. An entry that names no test is printed at the
