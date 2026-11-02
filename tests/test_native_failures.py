@@ -49,6 +49,16 @@ def advance(sup, until, seconds=6.0):
     return False
 
 
+def never_becomes_the_supervisor(monkeypatch):
+    """boot() ends in exec. A start that wrongly went ahead must fail this test, not replace the test run with a real supervisor."""
+
+    def refuse(*_a, **_k):
+        raise AssertionError("boot went on to start the supervisor")
+
+    monkeypatch.setattr(desktop, "_detach", refuse)
+    monkeypatch.setattr(desktop.os, "execv", refuse)
+
+
 def disk_is_full(monkeypatch):
     """Writing the state file and every other text file fails, as it does with nothing free."""
 
@@ -150,6 +160,7 @@ def test_with_room_on_the_disk_a_failure_keeps_its_own_words(cfg, monkeypatch):
 
 def test_a_start_with_no_room_says_so_and_starts_nothing(tmp_path, monkeypatch, capsys):
     layout = desktop.Layout(home=tmp_path / "home", resources=tmp_path / "AXIOM.app" / "Contents" / "Resources")
+    never_becomes_the_supervisor(monkeypatch)
     monkeypatch.setattr(supervisor.shutil, "disk_usage", lambda _: type("U", (), {"free": 1024})())
     assert desktop.boot(layout) == 1
     told = json.loads(layout.progress_file.read_text())
@@ -161,6 +172,7 @@ def test_a_start_that_cannot_even_report_still_ends_with_its_message(tmp_path, m
     """Nothing can be written at all: the window then looks at the disk itself. The failure must not become a traceback about boot.json."""
     layout = desktop.Layout(home=tmp_path / "home", resources=tmp_path / "AXIOM.app" / "Contents" / "Resources")
     layout.native.mkdir(parents=True)
+    never_becomes_the_supervisor(monkeypatch)
 
     def refuse(*_a, **_k):
         raise FULL
