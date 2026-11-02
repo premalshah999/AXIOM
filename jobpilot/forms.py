@@ -1852,6 +1852,16 @@ class FormSession:
             await asyncio.sleep(0.25)
         return False
 
+    def note_survey(self, state):
+        """This application's survey outcome for the answer rules: "launched" when the run opened the tax-credit survey, "finished" once the run
+        came back from it. A resolver without the attribute (a test double) simply has no record."""
+        if state == "launched" and getattr(self.resolver, "survey", "") == "finished":
+            return
+        try:
+            self.resolver.survey = state
+        except AttributeError:
+            pass
+
     def assessment_tab_returned(self):
         """The launched survey's tab now shows the application's own host: its last link was the way back."""
         origin = getattr(self, "assessment_origin", "")
@@ -1868,6 +1878,7 @@ class FormSession:
         if not url or not self.on_questionnaire():
             return False
         self.survey_finished = True
+        self.note_survey("finished")
         await self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
         self.emit("survey_returned", "Returned to the application after the tax-credit questionnaire")
         await self.settle(timeout=8)
@@ -1885,6 +1896,7 @@ class FormSession:
         survey = self.page
         self.page = openers.pop()
         self.survey_finished = True
+        self.note_survey("finished")
         if not survey.is_closed():
             try:
                 await survey.close()
@@ -6418,6 +6430,7 @@ class FormSession:
             # Workday's may open it in a tab. Either way the run comes back here when it is finished.
             self.assessment_origin = urlsplit(opener.url).hostname or ""
             self.assessment_return = opener.url
+            self.note_survey("launched")
         # A "Submit" that this guard allowed for a profile/account popup or a tax-credit
         # launcher must also pass the page's own click guard, or the click is silently
         # cancelled (Starbucks "Create your profile": the agent clicked Submit for minutes).
