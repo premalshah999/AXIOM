@@ -1,4 +1,4 @@
-// Where everything lives (DESIGN.md, Navigation). Eight pages, then the coming-soon group. Each item maps onto the route table in
+// Where everything lives (DESIGN.md, Navigation). Nine pages, then the coming-soon group. Each item maps onto the route table in
 // context.ts, which is where old URLs are resolved.
 import {
   Briefcase,
@@ -6,6 +6,7 @@ import {
   FileText,
   Gauge,
   Inbox,
+  ListChecks,
   ListOrdered,
   Mail,
   Mic,
@@ -34,6 +35,7 @@ export type NavItem = {
 
 export const ALL_ITEMS: NavItem[] = [
   { id: "overview", label: "Overview", icon: Gauge, route: { view: "batch" } },
+  { id: "review", label: "Review a batch", icon: ListChecks, route: { view: "review" } },
   { id: "queue", label: "Queue", icon: ListOrdered, route: { view: "queue" } },
   { id: "board", label: "Job board", icon: Briefcase, route: { view: "board" } },
   { id: "needs", label: "Needs you", icon: Inbox, route: { view: "needs" }, badge: "needs" },
@@ -96,11 +98,12 @@ export const PAGE_TABS: Partial<Record<View, TabItem[]>> = {
 
 /** Whether `item` is where `route` is. Routes are canonical, so one page is lit per view; the editor belongs to Resumes. */
 export function isActive(item: NavItem, route: Route): boolean {
-  return item.route.view === (route.view === "editor" ? "resumes" : route.view);
+  return item.route.view === (route.view === "editor" ? "resumes" : route.view === "tailor" ? "queue" : route.view);
 }
 
 /** The page's own name, for the page header and the document title. */
 export function titleFor(route: Route): string {
   if (route.view === "editor") return "Resume editor";
+  if (route.view === "tailor") return "Tailored resume";
   return ALL_ITEMS.find((i) => isActive(i, route))?.label ?? "AXIOM";
 }

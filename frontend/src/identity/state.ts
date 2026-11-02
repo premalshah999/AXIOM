@@ -19,7 +19,7 @@ export function statusLine(snapshot: Snapshot, state: PanelState): { text: strin
   if (state === "lost") return { text: "Connection lost", lamp: "ask" };
   if (state === "restart") return { text: "Needs a restart", lamp: "ask" };
   if (state === "paused") return { text: "Stopped", lamp: "off" };
-  if (state === "complete") return { text: "Target reached", lamp: "ok" };
+  if (state === "complete") return { text: "Daily limit reached", lamp: "ok" };
   if (state === "running") return { text: `Applying · ${busy} of ${limit} busy`, lamp: "live" };
   if (state === "held") return { text: "Waiting to start", lamp: "off" };
   return busy ? { text: `${busy} applying`, lamp: "live" } : { text: "Not applying", lamp: "off" };

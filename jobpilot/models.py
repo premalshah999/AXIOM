@@ -30,6 +30,10 @@ OPENAI_SERVICE_TIERS = {None, "auto", "default", "flex", "scale", "priority"}
 RANKING_PURPOSES = {"ClassifiedFit", "RankedBatch"}
 
 
+# A caller that wants the real cost of its own calls sets a list here; each completed call adds to it (resume tailoring reports this per job).
+COST_METER: ContextVar = ContextVar("model_cost_meter", default=None)
+
+
 def call_owner(run_id, purpose):
     """The `events.run_id` a model call is recorded under: its run, else "ranking" or "background"."""
     return run_id or ("ranking" if purpose in RANKING_PURPOSES else "background")
@@ -442,6 +446,14 @@ class MeteredTransport(httpx.AsyncBaseTransport):
             usage = {}
             finish_reason = None
             actual = reserve
+        if (meter := COST_METER.get()) is not None:
+            meter.append(
+                {
+                    "usd": usage["cost"] if openrouter and isinstance(usage.get("cost"), (int, float)) else actual,
+                    "prompt_tokens": usage.get("input_tokens" if anthropic else "prompt_tokens"),
+                    "completion_tokens": usage.get("output_tokens" if anthropic else "completion_tokens"),
+                }
+            )
         with self.db.exclusive() as s:
             budget = s.get(Budget, day)
             budget.spent = max(0, budget.spent + actual - reserve)

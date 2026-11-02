@@ -1,4 +1,5 @@
 import pytest
+from jobpilot.company_sites import allow
 from jobpilot.db import Job
 from jobpilot.admission import QueueBlocked
 
@@ -89,6 +90,7 @@ async def test_a_citizenship_requirement_closes_the_job_even_for_the_owners_pick
     with service.db.exclusive() as s:
         s.add(Job(id="citizen", identity="citizen", url="https://example.test/job/20", title="Data Engineer",
                   description="Great team. U.S. citizenship is required. Apply today.", status="ready"))
+    allow(service.db, ["citizen"])  # An unlabelled job reads as a company's own site: the owner's click sends it there.
     with pytest.raises(QueueBlocked) as err:
         await service.queue("citizen", "submit", owner_pick=owner_pick)
     assert err.value.code == "eligibility_conflict" and "U.S. citizenship is required" in str(err.value)

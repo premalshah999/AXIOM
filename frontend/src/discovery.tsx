@@ -209,23 +209,56 @@ export function AutoApplySettings() {
             !Number.isFinite(form!.minimum_auto_fit) || form!.minimum_auto_fit < 0 || form!.minimum_auto_fit > 100
               ? "A number from 0 to 100."
               : undefined;
-          const targetError =
-            !Number.isInteger(form!.batch_target) || form!.batch_target < 1 || form!.batch_target > 500
-              ? "A whole number from 1 to 500."
-              : undefined;
+          const sizeError =
+            !Number.isInteger(form!.review_size) || form!.review_size < 5 || form!.review_size > 100 ? "A whole number from 5 to 100." : undefined;
           return (
             <>
               <Panel>
-                <SwitchRow
-                  label="Apply to good matches automatically"
-                  note="When you save with this on, AXIOM starts looking and applying, if it isn't already."
-                  checked={!!form!.auto_apply}
-                  onChange={() => f.set("auto_apply", !form!.auto_apply)}
-                />
+                <div className="st-modes" role="radiogroup" aria-label="How jobs get queued">
+                  {[
+                    {
+                      auto: false,
+                      title: "Review a batch first",
+                      line: "AXIOM gathers its best new matches into a batch. You look them over, untick any, and accept: only what you accept is queued. Nothing else starts by itself.",
+                    },
+                    {
+                      auto: true,
+                      title: "Apply automatically",
+                      line: "AXIOM queues every good match by itself and sends each application once every required answer is checked, without asking you first, until it reaches your target.",
+                    },
+                  ].map((c) => (
+                    <button
+                      key={String(c.auto)}
+                      type="button"
+                      role="radio"
+                      aria-checked={!!form!.auto_apply === c.auto}
+                      className={"st-mode" + (!!form!.auto_apply === c.auto ? " is-on" : "")}
+                      onClick={() => f.set("auto_apply", c.auto)}
+                    >
+                      <i aria-hidden="true" />
+                      <span>
+                        <strong>{c.title}</strong>
+                        <small>{c.line}</small>
+                      </span>
+                    </button>
+                  ))}
+                </div>
                 <div className="st-fields" style={{ marginTop: "var(--space-4)" }}>
+                  {!form!.auto_apply && (
+                    <Input
+                      label="Jobs in a batch"
+                      hint="5 to 100."
+                      error={sizeError}
+                      type="number"
+                      min={5}
+                      max={100}
+                      value={Number.isFinite(form!.review_size) ? form!.review_size : ""}
+                      onChange={(e) => f.set("review_size", Number(e.target.value))}
+                    />
+                  )}
                   <Input
                     label="How close a match"
-                    hint="0 to 100. AXIOM won't apply on its own to a job that scores lower."
+                    hint={form!.auto_apply ? "0 to 100. AXIOM won't apply on its own to a job that scores lower." : "0 to 100. A job that scores lower isn't offered in a batch. You can still queue it yourself."}
                     error={fitError}
                     type="number"
                     min={0}
@@ -233,22 +266,12 @@ export function AutoApplySettings() {
                     value={Number.isFinite(form!.minimum_auto_fit) ? form!.minimum_auto_fit : ""}
                     onChange={(e) => f.set("minimum_auto_fit", Number(e.target.value))}
                   />
-                  <Input
-                    label="Applications to aim for"
-                    hint="AXIOM stops once this many have gone through, 1 to 500."
-                    error={targetError}
-                    type="number"
-                    min={1}
-                    max={500}
-                    value={Number.isFinite(form!.batch_target) ? form!.batch_target : ""}
-                    onChange={(e) => f.set("batch_target", Number(e.target.value))}
-                  />
                 </div>
               </Panel>
               <SaveBar
                 dirty={f.dirty}
                 saving={f.saving}
-                disabled={!!fitError || !!targetError}
+                disabled={!!fitError || !!sizeError}
                 onSave={f.save}
                 onDiscard={f.discard}
                 label="Save"

@@ -153,10 +153,17 @@ class ExecutionMixin:
             if not run or run.state != "queued":
                 return
             pool = pool_for(run)
-        async with self.browser_pools[pool]:
-            await self._execute_owned(run_id)
+        # The pool's slot is taken when the run claims its database slot, not while it waits at the claim gates: a queued run that
+        # waited for its employer or its platform's pace held a slot it did not use and kept every run behind it from being tried.
+        taken = []
+        try:
+            await self._execute_owned(run_id, self.browser_pools[pool], taken)
+        finally:
+            if taken:
+                self.browser_pools[pool].release()
+            getattr(self, "claim_gates", {}).pop(run_id, None)
 
-    async def _execute_owned(self, run_id):
+    async def _execute_owned(self, run_id, pool_gate=None, taken=None):
         import time
 
         from ..browser import BrowserUnavailable
@@ -178,7 +185,9 @@ class ExecutionMixin:
                     return
                 from ..job_control import state as job_state
 
-                if job_state(self.db, row.job_id).get("state") == "paused":
+                held = job_state(self.db, row.job_id)
+                # Take over's rebuilding dry run starts although the job is paused: the pause is what keeps everything else away.
+                if held.get("state") == "paused" and not (row.packet.get("steer") and held.get("steering") == "opening"):
                     row.state, row.finished_at = "paused", now()
                     return
                 from ..reserved import held_match
@@ -313,7 +322,21 @@ class ExecutionMixin:
                     claimed = True
                 else:
                     idle = 5 if gate.limit == 0 else 1
+                    # What this queued run is waiting for, in words: Queue shows it (queue_order.active_rows).
+                    if not hasattr(self, "claim_gates"):
+                        self.claim_gates = {}
+                    self.claim_gates[run_id] = (
+                        gate.reason if gate.limit == 0 and gate.reason
+                        else "Waiting for a free worker." if occupied >= allowed
+                        else "Another application at this employer is running; this one starts when it ends." if same_employer
+                        else "Waiting for a free slot in its worker pool." if not slots(s, row, self.config.topology)
+                        else "Waiting for its platform's pace: one at a time, with a pause between starts." if not may_start(s, current_job, row)
+                        else "Waiting for the email sender, which another application is using."
+                    )
             if claimed:
+                if pool_gate is not None:
+                    await pool_gate.acquire()
+                    taken.append(True)
                 break
             await asyncio.sleep(idle)
         started = time.monotonic()

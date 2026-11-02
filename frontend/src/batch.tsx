@@ -1,7 +1,8 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { api } from "./api";
 import { useWorkspace } from "./context";
-import { useAction, useDraft, useNow, usePoll } from "./hooks";
+import { useAction, useNow, usePoll } from "./hooks";
+import { ConsentWords } from "./permissions";
 import { DayChart, DotPatterns } from "./identity/DayChart";
 import { LiveWork, type LiveRow } from "./identity/LiveWork";
 import { MasterKey } from "./identity/MasterKey";
@@ -16,6 +17,7 @@ import { groupQuestions, QuestionCard, type QuestionGroup } from "./questions";
 import type { ApplicationWorkers, MailStatus, RuntimeHealth, Snapshot, Startable, Success } from "./types";
 import { ago, day, employerOf, jobWords, plural, urlRole } from "./format";
 import { Button, Dialog, Empty, Monogram, MonogramStack, Panel, Skeleton } from "./ui/index";
+import { BestMatches } from "./bestmatches";
 import { Notice } from "./worktools";
 import { pressResume, pressStop } from "./shell/StopControl";
 import "./styles/work.css";
@@ -64,6 +66,7 @@ export function BatchView() {
           <Results ledger={applications} />
         </div>
       </div>
+      <BestMatches />
     </div>
   );
 }
@@ -156,34 +159,60 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
   const active = state === "active";
   const target = rt.target || batch.target || 100;
   const confirmed = rt.confirmed ?? 0;
-  const [goal, setGoal] = useDraft("batch-target", counts.jobs || snapshot.jobs.length ? 100 : 25);
+  // One value: Settings › Limits › Applications per day. This field reads and writes the same setting, so the two always agree.
+  const limit = snapshot.config.daily_limit;
+  const [typed, setTyped] = useState<number | null>(null);
+  const goal = typed ?? limit;
+  const setGoal = (value: number) => setTyped(value);
+  const saveLimit = (raw: number) => {
+    const value = Math.max(1, Math.min(500, Math.round(raw || limit)));
+    if (value === limit) {
+      setTyped(null);
+      return Promise.resolve();
+    }
+    return run(
+      "limit",
+      async () => {
+        await api("/connections", "PUT", { values: { daily_application_limit: String(value) } });
+        await refresh();
+        setTyped(null);
+      },
+      `Applications per day: ${value}. Settings shows the same number.`,
+    );
+  };
   const workers = snapshot.config.workers_enabled;
   const noResume = snapshot.resumes.length === 0;
   const noKey = !snapshot.config.mimo;
   const [confirmStart, setConfirmStart] = useState<number | null>(null);
+  // Account creation and accepting terms are the person's call (onboarding asks the same question): Start asks again when they are off.
+  const profile = snapshot.profile;
+  const permitted = !!(profile?.allow_account_creation && profile?.accept_all_application_terms && profile?.allow_application_consents);
   const paused = snapshot.control.paused;
   const panel = panelState(snapshot, link.lost);
   const ready = usePoll<Startable>((signal) => api("/startable", "GET", undefined, signal), 30000, [version]);
   const stopped = paused || (!rt.intake_enabled && rt.intake_reason === "Paused");
   const n = work.working;
+  const reviewing = snapshot.config.apply_mode !== "auto";
 
   // The worst thing that is true right now, in plain words.
   const said: Record<PanelState, ["info" | "bad", string, string?]> = {
     lost: ["bad", "Connection lost", `Showing data from ${ago(link.updatedAt, now)}; retrying.`],
     restart: ["bad", "Needs a restart", "Automation has stopped responding. Restart it to keep applying."],
     paused: ["info", "Stopped", "Nothing starts until you press Resume. Progress is kept."],
-    complete: ["info", "Target reached"],
+    complete: ["info", "Daily limit reached", "Press Start tomorrow to apply again."],
     running: ["info", n ? `Applying to ${plural(n, "job")} right now` : ready.data?.startable === 0 ? "Nothing to run right now" : "Applying, between jobs"],
     held: ["info", "Waiting to start", (rt.intake_reason || "New applications are not starting").replace(/\.$/, "") + "."],
-    none: ["info", "Not applying", work.limit ? "Press Start to apply until a target you choose." : undefined],
+    none: n
+      ? ["info", `Applying to ${plural(n, "job")} right now`]
+      : ["info", "Not applying", work.limit ? (reviewing ? "Review a batch to choose what goes next, or press Start to let AXIOM choose." : "Press Start to apply until a target you choose.") : undefined],
   };
   const [tone, sentence, sub] = said[panel];
 
-  const begin = (value: number) =>
+  const begin = (value: number, permissions?: "allow" | "decline") =>
     run(
       "start",
       async () => {
-        const result = await api("/job-board/autopilot/start", "POST", { target: value });
+        const result = await api("/job-board/autopilot/start", "POST", { target: value, ...(permissions ? { permissions } : {}) });
         await refresh();
         return result;
       },
@@ -208,26 +237,40 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
       "Resumed. Existing progress is kept.",
     );
 
+  const dailyLimit = (
+    <label className="ov-target">
+      <span>Up to</span>
+      <input
+        type="number"
+        min={1}
+        max={1000}
+        step={1}
+        required
+        value={goal}
+        disabled={pending !== null}
+        onChange={(e) => setGoal(Number(e.target.value))}
+        onBlur={() => void saveLimit(goal)}
+        aria-describedby="target-hint"
+      />
+      <span>a day</span>
+      <span id="target-hint" className="sr-only">
+        The most applications AXIOM sends in a day, 1 to 1000. The same number as Applications per day in Settings.
+      </span>
+    </label>
+  );
   const key = !workers ? null : !active ? (
     <form
       className="ov-key"
       onSubmit={(e) => {
         e.preventDefault();
-        const value = Math.max(1, Math.min(500, Math.round(goal || 25)));
+        const value = Math.max(1, Math.min(500, Math.round(goal || limit)));
         // A batch sends on its own, which turns "Let me review first" off. Said before it happens, not found out afterwards.
-        if (!snapshot.control.auto_submit) setConfirmStart(value);
+        if (!snapshot.control.auto_submit || reviewing || !permitted) setConfirmStart(value);
         else begin(value);
       }}
     >
       <MasterKey type="submit" word="Start" icon="start" aria-label="Start applying" busy={pending === "start"} disabled={pending !== null || noResume || noKey} />
-      <label className="ov-target">
-        <span>Apply until</span>
-        <input type="number" min={1} max={500} step={1} required value={goal} onChange={(e) => setGoal(Number(e.target.value))} aria-describedby="target-hint" />
-        <span>confirmed</span>
-      </label>
-      <span id="target-hint" className="sr-only">
-        Up to 500 confirmed applications.
-      </span>
+      {dailyLimit}
     </form>
   ) : stopped ? (
     <div className="ov-key">
@@ -244,6 +287,7 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
   ) : (
     <div className="ov-key">
       <MasterKey word="Stop" icon="pause" aria-label="Stop applying" busy={pending === "pause"} disabled={pending !== null} onClick={pause} />
+      {dailyLimit}
       <p className="ov-key-note">Stops now. One already sending finishes.</p>
     </div>
   );
@@ -329,12 +373,23 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
               <Button variant="ghost" onClick={() => setConfirmStart(null)}>
                 Not yet
               </Button>
+              {!permitted && (
+                <Button
+                  onClick={() => {
+                    const value = confirmStart;
+                    setConfirmStart(null);
+                    void begin(value, "decline");
+                  }}
+                >
+                  No, don't make accounts
+                </Button>
+              )}
               <Button
                 variant="primary"
                 onClick={() => {
                   const value = confirmStart;
                   setConfirmStart(null);
-                  void begin(value);
+                  void begin(value, permitted ? undefined : "allow");
                 }}
               >
                 Send for me
@@ -342,8 +397,17 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
             </>
           }
         >
-          You chose not to send yet. Starting this turns sending on: AXIOM will find jobs and send each application once every required answer is
-          checked, without asking you first. To keep control, press Not yet and pick jobs yourself on the Jobs page.
+          {reviewing ? "You review each batch before anything is queued. Starting this switches to applying automatically" : "You chose not to send yet. Starting this turns sending on"}: AXIOM will find jobs and send each application once
+          every required answer is checked, without asking you first. To keep control, press Not yet{reviewing ? " and review a batch." : " and pick jobs yourself on the Job board."}
+          {!permitted && (
+            <>
+              <ConsentWords />
+              <p>
+                Send for me turns these on. No, don't make accounts starts without them: applications at employers that need an account or
+                accepted terms then stop and wait for you.
+              </p>
+            </>
+          )}
         </Dialog>
       )}
       {workers && noKey && !active && (
@@ -467,7 +531,7 @@ function Live({ work, checking }: { work: WorkingState; checking: boolean }) {
     lost: "Can't see what's running until the connection is back.",
     restart: "Nothing new starts until automation restarts.",
     paused: "Nothing is running. Resume to start the next application.",
-    complete: "Nothing is running. AXIOM reached your target.",
+    complete: "Nothing is running. AXIOM reached today's limit. Press Start tomorrow to continue.",
     running: "Between applications.",
     held: "Nothing is running. New applications are waiting to start.",
     none: "Nothing is running. Applications appear here with the step they're on.",
@@ -719,7 +783,7 @@ function FirstRun({ mail }: { mail: MailStatus | null }) {
     {
       done: false,
       title: "First application",
-      detail: "Add a job link, pick jobs in Discovered, or press Start above.",
+      detail: "Review a batch of your best matches, add a job link, or press Start above.",
       action: "Add a job",
       onClick: () => window.dispatchEvent(new Event(OPEN_JOB_LINK)),
     },

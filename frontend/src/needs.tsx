@@ -23,6 +23,7 @@ import {
   whoOf,
   type QuestionGroup,
 } from "./questions";
+import { SteeredJobs, useSteered } from "./steer";
 import { TopLine } from "./shell/Shell";
 import { useMedia } from "./shell/prefs";
 import type { Job, OverLimitPage, ReservedPage, Review, Run } from "./types";
@@ -140,7 +141,14 @@ function useInbox() {
   const { snapshot } = useWorkspace();
   const forms = useQuestionnaires();
   const contacts = forms.data?.modules.find((m) => m.id === "contacts");
-  const settled = !!forms.data || !!forms.error;
+  // The questions show at once. Supervisor and reference boxes join their one entry when the saved questionnaire arrives; waiting for
+  // it kept the whole page on a skeleton for as long as that one request took (3.4 s when it took 3 s).
+  const [waited, setWaited] = useState(false);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setWaited(true), 350);
+    return () => window.clearTimeout(timer);
+  }, []);
+  const settled = !!forms.data || !!forms.error || waited;
 
   const model = useMemo(() => {
     const runs = new Map(snapshot.runs.map((r) => [r.id, r]));
@@ -299,11 +307,13 @@ type Decision = { id: string; title: string; note: string; count: number };
 
 function useDecisions(): Decision[] {
   const { version, counts, route } = useWorkspace();
+  const steered = useSteered();
   const over = usePoll<OverLimitPage>((signal) => api("/over-limit?page=1&size=1", "GET", undefined, signal), 30000, [version]);
   const reserved = usePoll<ReservedPage>((signal) => api("/reserved?page=1&size=1", "GET", undefined, signal), 30000, [version]);
   const list: Decision[] = [
     { id: "decide:over", title: "Over your employer limit", note: "Approve to apply anyway", count: over.data?.count ?? 0 },
     { id: "decide:reserved", title: "Reserved", note: "Applied only after you approve each one", count: (reserved.data?.sections ?? []).reduce((n, s) => n + s.held, 0) },
+    { id: "decide:steer", title: "In your hands", note: "Applications you took over", count: steered.length },
     { id: "decide:unconfirmed", title: "Sent, with no receipt", note: "Check your email, or confirm it yourself", count: counts.groups.unconfirmed ?? 0 },
   ];
   return list.filter((d) => d.count > 0 || d.id === "decide:" + route.filter);
@@ -333,6 +343,7 @@ export function NeedsView() {
   const { counts, go, route } = useWorkspace();
   const inbox = useInbox();
   const decisions = useDecisions();
+  const steered = useSteered();
   const phone = useMedia("(max-width: 899px)");
   const [skipped, setSkipped] = useDraft<string[]>("needs-skipped", []);
   const [done, setDone] = useDraft("needs-done", 0);
@@ -459,7 +470,7 @@ export function NeedsView() {
   const total = done + inbox.questions;
   const showList = !phone || !opened || (!current && !deciding);
   const showPane = !phone || (opened && (!!current || !!deciding));
-  const waitingOnYou = decisions.filter((d) => d.id !== "decide:unconfirmed").reduce((n, d) => n + d.count, 0);
+  const waitingOnYou = decisions.filter((d) => d.id !== "decide:unconfirmed" && d.id !== "decide:steer").reduce((n, d) => n + d.count, 0);
 
   return (
     <div className="ax-page ax-page-fill nd-page-root">
@@ -539,6 +550,7 @@ export function NeedsView() {
             )}
             {deciding ? (
               <div className="nd-pane-in nd-decide">
+                {deciding === "decide:steer" && <SteeredJobs jobs={steered} />}
                 {deciding === "decide:over" && <OverLimitJobs />}
                 {deciding === "decide:reserved" && <ReservedJobs />}
                 {deciding === "decide:unconfirmed" && <HistoryList word="unconfirmed" inline />}

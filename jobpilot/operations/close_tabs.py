@@ -65,7 +65,11 @@ def close_inactive_tabs(db, endpoint, client):
         active_jobs = set(session.scalars(select(Run.job_id).where(Run.state.in_(ACTIVE))))
         known_jobs = set(session.scalars(select(Run.job_id).distinct()))
         rows = _ownership(session)
-    protected = {target for key, target, _, _ in rows if key.removeprefix("desktop_job:") in active_jobs}
+    from ..steer import steered_jobs
+
+    # A job the owner holds (Take over) keeps its tab, though no run is active on it.
+    held = set(steered_jobs(db))
+    protected = {target for key, target, _, _ in rows if key.removeprefix("desktop_job:") in active_jobs | held}
     protected.discard(None)
     while True:
         related = {t.get("openerId") for tid, t in targets.items() if tid in protected}
@@ -77,7 +81,7 @@ def close_inactive_tabs(db, endpoint, client):
     candidates = {}
     for key, target, inactive, inactive_ids in rows:
         jid = key.removeprefix("desktop_job:")
-        if jid in active_jobs or jid not in known_jobs:
+        if jid in active_jobs or jid in held or jid not in known_jobs:
             continue
         owner = inactive or target
         owned = set(inactive_ids or []) | ({owner} if owner else set())

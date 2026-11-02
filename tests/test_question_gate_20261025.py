@@ -201,3 +201,11 @@ async def test_open_questions_of_a_german_posting_close(service):
     with service.db.session() as s:
         run = s.get(Run, job)
         assert run.state == "closed" and "another country" in run.reason
+
+
+def test_a_finishing_run_recognises_a_required_video(service):
+    video = {"question": "Upload a video introducing yourself", "options": [], "required": True, "reason": "x"}
+    assert service.video_required(video)
+    assert not service.video_required({**video, "required": False})
+    assert not service.video_required({"question": "Portfolio - File upload", "reason": "Required document upload",
+                                       "required": True})

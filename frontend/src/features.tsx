@@ -7,6 +7,7 @@ import { useWorkspace } from "./context";
 import { useAction, useDraft, usePoll } from "./hooks";
 import { ago, day, plural, stamp } from "./format";
 import { Pagination, type Paging } from "./pagination";
+import { TailorChoice, type TailorState } from "./tailoring";
 import { Chips, SearchBox } from "./worktools";
 import {
   Button,
@@ -646,8 +647,9 @@ export function JobResume({
     15000,
     [jobId],
   );
+  const [tailored, setTailored] = useState<TailorState | null>(null);
   if (list.unavailable || (!list.data && !list.error)) return null;
-  const a = list.data?.items?.[0];
+  const a = tailored ? undefined : list.data?.items?.[0];
   return (
     <Panel
       title="Resume"
@@ -660,7 +662,8 @@ export function JobResume({
       }
     >
       <div className="dr-stack">
-        {masterOnly && (
+        <TailorChoice jobId={jobId} onChange={setTailored} />
+        {masterOnly && !tailored && (
           <p className="ax-note">
             {a?.sent?.state === "confirmed" ? (
               <>This application went out on {day(a.sent.at)} with the tailored version below.</>
@@ -741,7 +744,7 @@ export function JobResume({
             )}
           </>
         ) : (
-          !masterOnly && (
+          !masterOnly && !tailored && (
             <p className="ax-note">
               {eligible
                 ? "No tailored version yet. One is prepared before this application starts."
@@ -749,7 +752,7 @@ export function JobResume({
             </p>
           )
         )}
-        {eligible && (!a || a.status === "failed" || a.status === "cancelled") && (
+        {eligible && !masterOnly && !tailored && (!a || a.status === "failed" || a.status === "cancelled") && (
           <div>
             <Button
               size="sm"
@@ -779,9 +782,7 @@ export function JobResume({
                 ? "Preparing…"
                 : a
                   ? "Try again"
-                  : masterOnly
-                    ? "Make a version for this job"
-                    : "Prepare now"}
+                  : "Prepare now"}
             </Button>
           </div>
         )}

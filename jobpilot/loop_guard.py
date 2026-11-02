@@ -252,7 +252,7 @@ def stop_of(session, job):
     if job.demo:
         return None
     target = employer_identity(session, job)
-    if blocked := employer_cap_block(session, target):
+    if blocked := employer_cap_block(session, target, job):
         return blocked
     if hold := active(session, target):
         return QueueBlocked(hold["reason"], outcome="deferred", code="loop_guard", not_before=hold["until"])
@@ -303,6 +303,27 @@ def release(session, key):
 LEARN_DAYS = 200
 
 
+def scope_saved_caps(db):
+    """A limit saved before limits knew projects holds the employer's every job, though the refusal it came from named one
+    recruitment project ("within the "Bachelor/Master Graduate - 2027 Start" recruitment project", TikTok 2026-11-01: a
+    hold on all 150 of its jobs, senior roles included). Read the project from that refusal's run and record it. Returns
+    how many limits were scoped."""
+    from .employer_limit import application_cap, waiting_sentence
+
+    scoped = 0
+    with db.exclusive() as s:
+        for row in s.scalars(select(Setting).where(Setting.key.startswith(EMPLOYER_CAP_PREFIX, autoescape=True))):
+            cap = dict(row.value or {})
+            if cap.get("project") or not cap.get("run_id") or not (run := s.get(Run, cap["run_id"])):
+                continue
+            if project := (application_cap(run.reason or "") or {}).get("project"):
+                cap["project"] = project
+                cap["sentence"] = waiting_sentence(cap.get("company"), cap, cap.get("until"))
+                row.value = cap
+                scoped += 1
+    return scoped
+
+
 def learn_from_history(db):
     """At start: what the runs already recorded and no hold remembers. 33 of TikTok's jobs are closed on a refusal naming
     2026-12-31 and no build read it, so after the update its other jobs would each have opened one more browser. Only
@@ -311,7 +332,7 @@ def learn_from_history(db):
     from .employer_limit import APPLICATION_LIMIT, application_cap
 
     since = (datetime.now(UTC) - timedelta(days=LEARN_DAYS)).isoformat()
-    learned = 0
+    learned = scope_saved_caps(db)
     with db.exclusive() as s:
         rows = s.execute(
             select(Run.id, Run.reason, Run.finished_at, Job.id)
@@ -326,7 +347,7 @@ def learn_from_history(db):
             if not cap or not cap.get("until"):
                 continue  # A wait this app would be guessing from an old run: the next refusal says.
             job = s.get(Job, job_id)
-            if employer_cap_block(s, employer_identity(s, job)):
+            if employer_cap_block(s, employer_identity(s, job), job):
                 continue
             if remember_employer_cap(s, job, cap, run_id=rid):
                 learned += 1

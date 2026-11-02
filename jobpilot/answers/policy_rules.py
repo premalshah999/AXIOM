@@ -83,6 +83,30 @@ class PolicyRulesMixin:
                         reason="Confirmed No",
                     )
         facts = self.profile.facts or {}
+        if re.search(
+            r"\bdid you (?:already |previously )?(?:complete|finish|take|fill out)(?:d)? (?:the |this )?(?:WOTC|work opportunity tax credit)"
+            r"(?: online| tax credit)? (?:survey|questionnaire|screening|form)\b",
+            question_head(label) or label,
+            re.I,
+        ):
+            # Regions (2026-11-01): the model answered Yes to "Did you complete the WOTC survey?", which asked for a confirmation number
+            # that does not exist. The answer is this application's own survey outcome (forms.note_survey): Yes only when the run came
+            # back from the survey it launched; No when none was launched, so nothing suggests one was done; a launched survey the run
+            # did not see finish is the applicant's to say.
+            survey = getattr(self, "survey", "")
+            yes = [o for o in options if re.match(r"^\s*yes\b", str(o), re.I)]
+            if survey == "finished" and len(yes) == 1:
+                return self._ans(f, yes[0], ["policy:wotc-survey-finished-in-run"], "This run finished the survey")
+            if survey:
+                return Answer(
+                    field_id=f["id"],
+                    disposition="review" if f.get("required") else "skip",
+                    reason="The tax-credit survey was opened in this run and its outcome is not provable here",
+                    blocker_type="missing_fact",
+                )
+            no = [o for o in options if NO_OPTION.search(str(o)) and not DECLINE.search(str(o))]
+            if len(no) == 1:
+                return self._ans(f, no[0], ["policy:wotc-survey-not-completed"], "No WOTC survey was completed")
         if (
             WOTC.search(label)
             and not DEMOGRAPHIC.search(label)

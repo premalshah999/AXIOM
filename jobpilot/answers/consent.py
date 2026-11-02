@@ -222,6 +222,49 @@ REFUSE_OPTION = re.compile(r"\b(?:do not|don.?t|did not|decline|disagree|refuse|
 READ_QUESTION = re.compile(
     r"\b(?:have|did) you (?:read|review(?:ed)?)(?: and (?:understood?|understand|agreed?(?: to)?|accept(?:ed)?|acknowledged?))?\b[^.?!]{0,60}\?\W*$", re.I
 )
+# Pennant's Workday (2026-11-01): "I agree to submit the Employment Verification Form (I-9) within three business days of employment ..." offered
+# only "I Acknowledge" / "I Do Not Acknowledge", which no run could pick. A bare acknowledgement of a procedure accepts it, never an oath: a label
+# that swears, certifies, declares or states a record is not this.
+ACK_OPTION = re.compile(r"^\s*i\s+(?:acknowledge|accept|agree|consent)\W*$", re.I)
+ACK_FORBIDDEN = re.compile(
+    r"\b(?:swear|certify|attest|declare|affirm|under penalty|perjury|oath|convicted|criminal|felony|arrest\w*|registered|selective service|"
+    r"authori[sz]ed to work|citizen\w*|veteran|disabilit\w*)\b",
+    re.I,
+)
+# An allow-list, not a blacklist: a blacklist of oaths keeps missing claims ("at least 18 years of age", "hold a valid licence"). Every sentence
+# that speaks in the first person must be reading or a procedure ("I have read the policy", "I agree to submit the form within three days",
+# "I accept the arbitration agreement"); one that states anything about the applicant's own age, licence, record, eligibility or status
+# is a fact for its fact check or the person, never an acknowledgement. Unmatched wording fails closed.
+_JOIN = r"(?:\s+and\s+(?:agree|accept|acknowledge|understand))?"
+PROCEDURAL_SENTENCE = (
+    re.compile(rf"^\W*(?:by [^,]{{0,60}},\s*)?I (?:hereby )?(?:acknowledge|confirm|understand|agree|accept){_JOIN}(?: that)? I (?:have )?(?:read|reviewed|received)\b", re.I),
+    re.compile(
+        rf"^\W*I (?:hereby )?(?:acknowledge|agree|accept){_JOIN} to (?:(?:[\w'-]+\s+){{0,3}}?)(?:submit|provide|complete|bring|present|sign|return|send|upload|attend|furnish|supply|produce)\b",
+        re.I,
+    ),
+    re.compile(
+        rf"^\W*I (?:hereby )?(?:acknowledge|agree|accept|understand){_JOIN}(?: to| with)? (?:the |this |these |our |all |its )?(?:[\w'-]+\s+){{0,4}}?"
+        r"(?:terms|conditions|policy|policies|notice|agreement|arbitration|handbook|disclosure|statement|procedure|process)\b",
+        re.I,
+    ),
+)
+FIRST_PERSON = re.compile(r"\b(?:I|my|me|mine)\b", re.I)
+# What a procedural sentence must not also say about the applicant, however it began.
+SELF_STATEMENT = re.compile(r"\bI (?:am|was|had|hold|possess|do|don.?t|will not|can|meet|have (?!read\b|reviewed\b|received\b))\b", re.I)
+
+
+def procedural_acknowledgement(label):
+    """True when the label asks only for reading or a procedure to be acknowledged: it has such a sentence, and every first-person sentence is one."""
+    allowed = False
+    for sentence in re.split(r"(?<=[.!?])\s+", str(label).strip()):
+        if not FIRST_PERSON.search(sentence):
+            continue
+        if SELF_STATEMENT.search(sentence) or not any(rule.search(sentence) for rule in PROCEDURAL_SENTENCE):
+            return False
+        allowed = True
+    return allowed
+
+
 PLACEHOLDER_OPTION = re.compile(r"^\s*(?:-+|select\b.*|choose\b.*|please (?:select|choose)\b.*)?\s*$", re.I)
 
 
@@ -234,6 +277,14 @@ def agreement_choice(label, options):
     if READ_QUESTION.search(str(label).strip()):
         yes = [o for o in offered if o.strip().casefold() == "yes"]
         return yes[0] if yes and any(o.strip().casefold() == "no" for o in offered) else None
+    if (
+        not ACK_FORBIDDEN.search(str(label))
+        and procedural_acknowledgement(label)
+        and len([o for o in offered if ACK_OPTION.fullmatch(o)]) == 1
+        and len([o for o in offered if REFUSE_OPTION.search(o)]) == 1
+        and ACKNOWLEDGEMENT.search(str(label))
+    ):
+        return next(o for o in offered if ACK_OPTION.fullmatch(o))
     agree = [o for o in offered if AGREE_OPTION.search(o) and not REFUSE_OPTION.search(o) and not EMBEDDED_DISCLOSURE.search(o) and not CONTACT_CONSENT.search(o)]
     refuse = [o for o in offered if REFUSE_OPTION.search(o)]
     return agree[0] if len(agree) == 1 and len(refuse) == 1 else None

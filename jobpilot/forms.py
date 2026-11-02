@@ -372,7 +372,7 @@ ROW_CONTEXT_JS = """el => {
   for (let n = walker.previousNode(), steps = 0; n && steps < 60 && !(out.caption && out.heading); n = walker.previousNode(), steps++) {
     const t = clean(n.textContent), host = n.parentElement;
     if (!t || !host || host.closest('script,style,noscript,option,button,a') || !/[a-z]{3}/i.test(t) || !visible(host)) continue;
-    if (own.has(t) || t.length > 400) continue;
+    if (own.has(t) || t.length > 1500) continue;
     const isHeading = host.closest('legend,[role=heading],h1,h2,h3,h4,h5,h6');
     if (isHeading) { if (!out.heading) out.heading = t; continue; }
     if (!out.caption && (t.length >= 12 || /\\?/.test(t)) && !host.closest('label')) out.caption = t;
@@ -476,6 +476,9 @@ def regroup_history_rows(fields, profile):
                     f["group"] = group
 
 
+EDUCATION_DATE_PART = re.compile(r"(?:start|end) date (?:month|year)", re.I)
+
+
 def mark_history_rows(fields):
     """Row N of a repeated, unnumbered work block is profile work entry N (current/most recent first).
 
@@ -540,6 +543,19 @@ def mark_history_rows(fields):
             if len(row_fields) == len(schools["school"]):
                 for index, f in enumerate(row_fields):
                     f["history_row"] = {"kind": "education", "index": index}
+    if not schools["school"] and len(schools["degree"]) == 1:
+        # Greenhouse's education block names no school: Degree, Discipline, "End date month", "End date year" (Quantifind,
+        # 2026-11-01). Its dates are the highest degree's, as for a single school above; left unplaced they went to the
+        # applicant although the resume holds the graduation date.
+        parts = [f for f in fields if EDUCATION_DATE_PART.fullmatch(clean(f)) and block(f) == "education"]
+        for f in parts:
+            f["history_row"] = {"kind": "education", "index": "highest"}
+        if parts:
+            # The whole block is one entry: Degree and Discipline beside those dates are the same highest degree's. Left to the
+            # first profile entry they sent a Bachelor's with a Master's graduation date when the profile lists Bachelor first.
+            for f in fields:
+                if re.fullmatch(r"(?:degree(?: type| level)?|discipline|major|field of study|area of study)", clean(f), re.I) and block(f) == "education":
+                    f["history_row"] = {"kind": "education", "index": "highest"}
     # A date no row claims (another block's "Start Date") makes that label ambiguous: it is not placed at all.
     matched.update({attr: ([f for f in v if block(f) == "work"] if all(block(f) for f in v) else [])
                     for attr, v in dates.items()})
@@ -1439,6 +1455,9 @@ class FormSession:
         self.last_problems = []
         self.network = None
         self.accept_prefilled = False
+        # Take over's hand-back (steer.py): what the owner typed into the page is the owner's answer on the page they left.
+        self.owner_hands = None
+        self.owner_snapshot = None
         self.resume_seen = False
         self.workday_resume_replaced = False
         self.control_recoveries = {}
@@ -1678,6 +1697,51 @@ class FormSession:
             shortened.append(field["label"])
         return shortened
 
+    def adopt_owner_values(self):
+        """The owner finished part of this page by hand (Take over, then Done, continue): a value they typed or chose is their
+        answer, and the engine does not ask again or write over it. Only what was on the page at hand-back counts: the first
+        pass snapshots each field and value actually there (owner_snapshot), and owner_by_hand binds to exactly those. A later
+        step that keeps the same title and headings is a different page: a field absent from the snapshot, or one whose value
+        is no longer the snapshot's, goes through normal answer resolution; when none of the snapshot's fields remain the
+        authorization is revoked."""
+        if self.owner_hands is None:
+            return
+        page = tuple(self.meta.get("headings") or []) + (self.meta.get("title", ""),)
+        eligible = {}
+        for f in self.fields.values():
+            if f["type"] in {"file", "password", "button"} or f.get("site_account") or not has_value(f) or not f["valid"]:
+                continue
+            if AUTH.search(f["label"]):
+                continue
+            eligible[self.field_key(f)] = f
+        if self.owner_hands is True:
+            self.owner_hands = page
+            self.owner_snapshot = {k: f["value"] for k, f in eligible.items()}
+        snapshot = self.owner_snapshot or {}
+        present = {self.field_key(f) for f in self.fields.values()}
+        if page != self.owner_hands or not (set(snapshot) & present):
+            self.owner_hands = None
+            self.owner_snapshot = None
+            return
+        kept = 0
+        for key, f in eligible.items():
+            if key not in snapshot or snapshot[key] != f["value"]:
+                continue
+            self.expected[f["id"]] = f["value"]
+            self.expected_slots[key] = f["value"]
+            self.record_answer(f, f["value"], ["owner_by_hand"], verified=True)
+            kept += 1
+        if kept:
+            self.emit("owner_values", "Kept what the owner entered by hand on this page", {"fields": kept})
+
+    def owner_handed(self, x):
+        """True when this field is one the owner handed back as it stands (adopt_owner_values): the fill pass leaves it be."""
+        if not self.owner_hands or x["id"] not in self.expected or x["id"] not in self.ledger:
+            return False
+        if "owner_by_hand" not in (self.ledger[x["id"]].get("evidence_ids") or []):
+            return False
+        return (self.owner_snapshot or {}).get(self.field_key(x), object()) == x.get("value")
+
     def record_answer(self, field, value, evidence_ids, verified=False):
         from .answer_context import digest
 
@@ -1809,6 +1873,16 @@ class FormSession:
             await asyncio.sleep(0.25)
         return False
 
+    def note_survey(self, state):
+        """This application's survey outcome for the answer rules: "launched" when the run opened the tax-credit survey, "finished" once the run
+        came back from it. A resolver without the attribute (a test double) simply has no record."""
+        if state == "launched" and getattr(self.resolver, "survey", "") == "finished":
+            return
+        try:
+            self.resolver.survey = state
+        except AttributeError:
+            pass
+
     def assessment_tab_returned(self):
         """The launched survey's tab now shows the application's own host: its last link was the way back."""
         origin = getattr(self, "assessment_origin", "")
@@ -1825,6 +1899,7 @@ class FormSession:
         if not url or not self.on_questionnaire():
             return False
         self.survey_finished = True
+        self.note_survey("finished")
         await self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
         self.emit("survey_returned", "Returned to the application after the tax-credit questionnaire")
         await self.settle(timeout=8)
@@ -1842,6 +1917,7 @@ class FormSession:
         survey = self.page
         self.page = openers.pop()
         self.survey_finished = True
+        self.note_survey("finished")
         if not survey.is_closed():
             try:
                 await survey.close()
@@ -3305,6 +3381,11 @@ class FormSession:
                 # nothing on Lyft's Greenhouse form, and the refill cleared a choice already made (2026-10-25). The city
                 # is searched too, and the address picks its own state's result.
                 search_queries = [*search_queries, city]
+            state = getattr(getattr(getattr(self.resolver, "profile", None), "address", None), "state", "") or ""
+            if state and self.location_resolver(field) and normalize(state) != normalize(value):
+                # Other boxes list regions only ("Maryland, United States"; n8n's Ashby "Where are you currently based? Please specify the
+                # state", 2026-11-01): the state is searched by its full name, since "MD" lists Morocco and Malaysia.
+                search_queries = [*search_queries, max(widgets._alias_group(state) | {normalize(state)}, key=len).title()]
             country = getattr(getattr(getattr(self.resolver, "profile", None), "address", None), "country", "") or ""
             if country and self.location_resolver(field) and normalize(country) != normalize(value):
                 # Some location boxes list countries only: "Location, Country you're currently residing in" answered "No results" for the
@@ -3718,7 +3799,7 @@ class FormSession:
     def location_resolver(self, field):
         """For a location search box, pick the result matching the applicant's address."""
         from .answers import CONTACT, address_location_option
-        from .answers.contact import address_country_option
+        from .answers.contact import address_country_option, address_state_option
 
         if not self.resolver or normalize(field.get("label", "")) not in CONTACT["location"] | {
             "city",
@@ -3726,7 +3807,11 @@ class FormSession:
         }:
             return None
         address = self.resolver.profile.address
-        return lambda texts: address_location_option(texts, address) or address_country_option(texts, address)
+        return lambda texts: (
+            address_location_option(texts, address)
+            or address_state_option(texts, address)
+            or address_country_option(texts, address)
+        )
 
     @timed("discover")
     async def discover_options(self, field):
@@ -3810,14 +3895,19 @@ class FormSession:
                 await widgets.open_combobox(el)
                 scope = await widgets._popup_scope(el)
                 opts = await widgets.wait_options(frame, scope, timeout=1.2, owner=el)
-                field["options"] = [
-                    o["text"] for o in opts if not o["disabled"] and not widgets.placeholder_option(o["text"])
-                ][:250]
                 # Editable search results are a window, not the complete catalog.
                 # Ashby/React may declare "both" or omit aria-autocomplete.
                 editable = await el.evaluate(
                     "e => ['INPUT','TEXTAREA'].includes(e.tagName) && !e.readOnly && !e.disabled"
                 )
+                if not opts and not (editable and await el.get_attribute("aria-autocomplete") in {"list", "both"}):
+                    # A menu that fetches its rows when it opens shows nothing for a second or more; it was read as offering
+                    # no choices, and the question reached the owner with an empty dropdown (owner 2026-11-01). One patient
+                    # look, only where the control is not a search box (those list nothing until typed, by design).
+                    opts = await widgets.wait_options(frame, scope, timeout=4.0, owner=el)
+                field["options"] = [
+                    o["text"] for o in opts if not o["disabled"] and not widgets.placeholder_option(o["text"])
+                ][:250]
                 field["options_partial"] = (
                     editable
                     or await el.get_attribute("aria-autocomplete") in {"list", "both"}
@@ -3914,15 +4004,25 @@ class FormSession:
                 continue
             for key in ("caption", "heading"):
                 if found.get(key) and normalize(found[key]) != normalize(item["question"]):
-                    context[key] = found[key][:300]
+                    # A long paragraph ends with its question: keep the end ("...or any predecessor entities?").
+                    text = found[key]
+                    context[key] = text if len(text) <= 300 else "…" + text[-299:].lstrip()
             identity = {k: v for k, v in (found.get("identity") or {}).items() if v}
-            if identity and found.get("kind") and not context.get("history_identity"):
+            section = str((item.get("scope") or {}).get("section") or "")
+            # A question under "Additional Information" is not a school or job row, whatever block holds the page.
+            non_history = bool(section) and not re.search(r"experience|employ|education|school|history|work|job", section, re.I)
+            if identity and found.get("kind") and not context.get("history_identity") and not non_history:
                 context["history_kind"], context["history_identity"] = found["kind"], identity
                 if isinstance(found.get("index"), int) and found["index"] > 0:
                     context["row_index"] = found["index"]
                 dom_id = (self.fields.get(item["field_id"]) or {}).get("dom_id")
                 if dom_id:
                     self.row_hints[dom_id] = {"kind": found["kind"], "identity": identity}
+        from .option_reader import complete_choices
+
+        # The owner is asked with every choice the page offers, read patiently (a menu that loads when opened, a long scrolled
+        # list), or told it is a search to type into: never an empty dropdown (owner 2026-11-01).
+        await complete_choices(self)
 
     async def attach_owner_documents(self):
         """Attach a document the owner sent for an upload question (a transcript, a work sample) to each required,
@@ -4504,6 +4604,7 @@ class FormSession:
         self.expected = {}
         self.expected_labels = {}
         self.expected_slots = {}
+        self.adopt_owner_values()
         await self.replace_workday_resume()
         if self.workday:
             body = await self._page_text()
@@ -4650,6 +4751,7 @@ class FormSession:
                     x["type"] in ("file", "password")
                     or x.get("site_account")
                     or handled.get(x["id"]) == self.question_shape(x)
+                    or self.owner_handed(x)
                     or AUTH.search(x["label"])
                     or (
                         self.accept_prefilled
@@ -6017,7 +6119,16 @@ class FormSession:
                 await locator.evaluate("e => { e.value = '' }", timeout=5000)
             except PlaywrightError:
                 pass  # A replaced input is found again by the next attempt's set_input_files.
-            await locator.set_input_files(str(self.resume_path), timeout=15000)
+            try:
+                await locator.set_input_files(str(self.resume_path), timeout=15000)
+            except PlaywrightTimeoutError:
+                # The widget drops its input once it lists a file (clear_resume_input), so a later pass finds none: 5 runs
+                # of 16 "Browser control failed at forms.py:5784/5788" were this 15 s timeout (2026-10-31/11-01). Listed
+                # means the upload worked; otherwise another pass or the form's own upload check says what is missing.
+                if await self.greenhouse_resume_listed():
+                    return
+                await self.page.wait_for_timeout(1500)
+                continue
             if await self.greenhouse_resume_listed():
                 return
             await self.page.wait_for_timeout(1500)
@@ -6339,6 +6450,7 @@ class FormSession:
             # Workday's may open it in a tab. Either way the run comes back here when it is finished.
             self.assessment_origin = urlsplit(opener.url).hostname or ""
             self.assessment_return = opener.url
+            self.note_survey("launched")
         # A "Submit" that this guard allowed for a profile/account popup or a tax-credit
         # launcher must also pass the page's own click guard, or the click is silently
         # cancelled (Starbucks "Create your profile": the agent clicked Submit for minutes).
@@ -7144,7 +7256,7 @@ class FormSession:
                         "evidence": text[max(0, match.start() - 20) : match.end() + 200], "missing_fields": []}
             from .employer_limit import application_cap
 
-            if cap := application_cap(tail):
+            if cap := application_cap(tail, refused=True):
                 # The employer's own application limit (Benchling, Aurora, OpenAI on Ashby): nothing was accepted.
                 return {"type": "explicit_rejection_page", "url": self.page.url, "category": "employer_limit",
                         "cap": cap, "evidence": text[max(0, match.start() - 20) : match.end() + 300],

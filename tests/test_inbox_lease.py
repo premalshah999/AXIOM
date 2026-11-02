@@ -35,7 +35,7 @@ class FakeMail:
     def rule_for(self, url):
         return {"id": "rule-1", "mailbox_id": 1, "sender_domains": ["oraclecloud.com", "oracle.com"]}
 
-    def begin(self, run_id, rule, recipient, kind="auto", *, resume_challenge_id=None):
+    def begin(self, run_id, rule, recipient, kind="auto", since=None, *, resume_challenge_id=None):
         self.begin_calls += 1
         if self.release_at is None or self.clock.now < self.release_at:
             raise ValueError("Another application is verifying with this sender; retry after it finishes")

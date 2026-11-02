@@ -8,6 +8,7 @@ import { ConnectionFields, ConnectionsGate, FieldInput, useConnections } from ".
 import { AutoApplySettings } from "./discovery";
 import { ago, plural } from "./format";
 import { Facts, RestartNotice, SaveBar, SwitchRow } from "./setup-kit";
+import { TailorApprovalRow } from "./tailoring";
 import type {
   AgentModelProvider,
   AgentSettings,
@@ -50,18 +51,19 @@ export function ApplyingSettings() {
         <Panel>
           <SwitchRow
             label="Send applications"
-            note="Off: nothing goes to an employer, and jobs you add wait. Turn it on and they start."
+            note="Off: nothing goes to an employer, and jobs you queue wait. Turn it on and they start."
             checked={!!control.auto_submit}
             disabled={pending !== null}
             onChange={() => toggle(control.auto_submit ? "AXIOM will stop before sending." : "AXIOM will send applications.")}
           />
+          <TailorApprovalRow />
         </Panel>
       </section>
       <section className="st-group" aria-labelledby="st-auto">
         <div className="st-head">
           <div>
-            <h2 id="st-auto">Automatic applications</h2>
-            <p>What AXIOM applies to without asking you first.</p>
+            <h2 id="st-auto">How jobs get queued</h2>
+            <p>Whichever you choose, you can still queue any job yourself with one click.</p>
           </div>
         </div>
         <AutoApplySettings />
@@ -192,7 +194,7 @@ function automation(rt: AutopilotRuntime, paused: boolean, sched: SchedulerHealt
   const progress = done > goal ? `${done} confirmed, target ${goal}` : `${done} of ${goal} confirmed`;
   if (sched.degraded) return { tone: "bad" as const, text: "Needs a restart", note: "Automation is degraded." };
   if (paused) return { tone: "warn" as const, text: "Stopped", note: "Nothing starts until you press Resume applications." };
-  if (rt.state === "complete") return { tone: "neutral" as const, text: "Target reached", note: progress };
+  if (rt.state === "complete") return { tone: "neutral" as const, text: "Daily limit reached", note: `${progress}. Press Start tomorrow to apply again.` };
   if (rt.intake_enabled)
     return { tone: "ok" as const, text: "Running", note: workers ? `${progress}, ${plural(workers, "worker")}` : progress };
   if (rt.state === "active") return { tone: "warn" as const, text: "Held", note: rt.intake_reason || progress };

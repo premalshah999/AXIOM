@@ -229,6 +229,7 @@ async def test_the_tick_measures_the_goal_the_same_way_as_the_dashboard(service,
     from jobpilot.jobboard import BoardSettings
 
     service.dispatch = lambda *args: None
+    service.config.daily_application_limit = 3  # the tick's goal is the daily limit
     service.db.set_setting("control", {"auto_submit": True})
     monkeypatch.setattr(autopilot, "settings", lambda db: BoardSettings(auto_apply=True))
     with service.db.exclusive() as s:

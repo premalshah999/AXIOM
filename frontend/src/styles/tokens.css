@@ -66,6 +66,8 @@
   --brand-ink: #171613;
   /* The one signal colour. It only ever means the machine is live, or something needs you. */
   --led: #ff4310;
+  --mark-hit: #2f9e62; /* A resume keyword it has. */
+  --mark-have: #c7931a; /* A keyword it could use. */
   --signal: #ff4a17;
   --signal-ink: #ff8a63;
   --signal-soft: rgba(255, 74, 23, 0.14);

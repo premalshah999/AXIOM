@@ -17,6 +17,7 @@ from ..schemas import Profile
 from .. import shortlinks
 from ..admission import QueueBlocked, employer_partition, requisition_twins, temporary_time, require_intake
 from ..runtime import engine_version, profile_version
+from ..steer import hands_back as steer_hands, opening as steer_opening
 from .states import ACTIVE, RETRYABLE
 
 # Admission is synchronous database work: dozens of guard queries inside the app lock (a PostgreSQL advisory lock).
@@ -306,7 +307,7 @@ class QueueingMixin:
                 raise QueueBlocked("Job not found", code="not_found")
             from ..job_control import require_running
 
-            require_running(s, job_id)
+            require_running(s, job_id, mode)
             from ..stop import refuse
 
             # Every path that starts an application comes through here, whoever asks: the batch, a retry, an answered
@@ -438,6 +439,13 @@ class QueueingMixin:
                     outcome="protected",
                     code="submitted_or_uncertain",
                 )
+            from ..company_sites import WHY, allowed, is_company_site
+
+            # A company's own site is never started by anything automatic, nor by a click on the main list: the owner sends it from
+            # Job board > Company sites (company_sites.py). After the duplicate guards above, which still decide first; a retry of an
+            # earlier run is that run's own continuation.
+            if mode == "submit" and not retry and not job.demo and is_company_site(job.ats) and not allowed(s, job_id):
+                raise QueueBlocked(WHY, outcome="excluded", code="company_site")
             require_intake(s, job_id)
             if mode == "submit":
                 from ..application_budget import require_allowance
@@ -480,7 +488,7 @@ class QueueingMixin:
                 source = s.get(Run, recovery_source_run)
                 control = s.get(Setting, "control").value
                 from ..pipeline_comparison import SPECIALIST, assign_pool
-                from ..recovery import MAIL_CAUSES, specialist_attempts
+                from ..recovery import CONTINUATION_CAUSES, specialist_attempts
 
                 specialist = source and assign_pool(s, job, source) == SPECIALIST
                 exhausted = (
@@ -494,8 +502,8 @@ class QueueingMixin:
                     not retry
                     or mode != "submit"
                     or control.get("paused")
-                    # A run waiting on an employer's mail is the same attempt, whatever the switch says (recovery.MAIL_CAUSES).
-                    or not (profile.autonomous or (recovery_row and recovery_row.value.get("cause") in MAIL_CAUSES))
+                    # A wait that sent nothing is the same approved attempt, whatever the switch says (recovery.CONTINUATION_CAUSES).
+                    or not (profile.autonomous or (recovery_row and recovery_row.value.get("cause") in CONTINUATION_CAUSES))
                     or not recovery_row
                     or not recovery_row.value.get("scheduled")
                     or recovery_row.value.get("source_run_id") != recovery_source_run
@@ -599,6 +607,11 @@ class QueueingMixin:
             path = self.config.data_dir / "resumes" / chosen.filename
             from ..execution_services import pin_resume
 
+            # This job's own choice, over the account's policy: Apply with a tailored resume waits here until that resume may be sent.
+            if not job.demo and not (continuation and continuation.packet.get("resume_artifact_id")):
+                from ..features.resumes.choice import artifact_for_queue
+
+                resume_artifact_id = artifact_for_queue(s, job, mode) or resume_artifact_id
             if (
                 not job.demo
                 and not master
@@ -636,7 +649,8 @@ class QueueingMixin:
                         )
                     resume_artifact_id = artifact.id if artifact else None
 
-            if master:
+            keeps_variant = bool(continuation and continuation.packet.get("resume_artifact_id"))
+            if master and not resume_artifact_id and not keeps_variant:
                 artifact_packet = {"resume_policy": "master"}
             else:
                 artifact_packet, packet_profile = pin_resume(
@@ -690,6 +704,9 @@ class QueueingMixin:
                     "match_approved": job.status == "ready"
                     or bool(retry and any(x.packet.get("match_approved") for x in previous)),
                     "engine_version": engine_version(),
+                    # Take over's rebuilding run: the engine keeps its tab open for the owner whatever the result.
+                    **({"steer": True} if mode == "dry_run" and steer_opening(s, job.id) else {}),
+                    **({"owner_hands": True} if mode == "submit" and steer_hands(s, job.id) else {}),
                     "model_version": self.config.llm_provider + ":" + self.config.llm_model,
                     "runner_tier": job_tier(self.db, job.id),
                     "profile_version": profile_version(packet_profile),

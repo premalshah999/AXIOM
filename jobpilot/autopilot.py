@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import json
+import logging
 import re
 import sys
 import time
@@ -121,8 +122,8 @@ async def start_autonomous(service, target=100, refresh_sources=True):
 
     if not service.dispatch:
         raise ValueError("Application workers are disabled")
-    if not 1 <= target <= 500:
-        raise ValueError("Choose a batch target from 1 to 500")
+    if not 1 <= target <= 1000:
+        raise ValueError("Choose a batch target from 1 to 1000")
     db = service.db
     control = db.get_setting("control", {})
     if control.get("paused"):
@@ -177,6 +178,17 @@ async def start_autonomous(service, target=100, refresh_sources=True):
     }
 
 
+def counting_from(started_at, timezone):
+    """When this batch's goal starts counting: the batch's start or the person's midnight, whichever is later.
+
+    The goal is the daily limit, so 20 confirmations yesterday and 5 today are 5 toward today's limit (the tick counted
+    everything since the batch started and completed the batch while the screen said "a day")."""
+    midnight = (
+        datetime.now(ZoneInfo(timezone)).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(UTC).isoformat()
+    )
+    return max(started_at or "", midnight)
+
+
 def confirmed_since(session, started_at):
     """Distinct non-demo jobs with a confirmed, evidence-settled run created at or after `started_at`, any origin."""
     if not started_at:
@@ -229,6 +241,7 @@ def batch_snapshot(service):
                     .where(
                         Run.job_id.in_(owned_jobs),
                         Run.state == "confirmed",
+                        Run.created_at >= counting_from(batch.get("started_at"), service.config.timezone),
                         Run.receipt["evidence_reconciliation"].as_string().is_distinct_from("pending"),
                     )
                 )
@@ -236,7 +249,7 @@ def batch_snapshot(service):
         # Goal progress is every distinct job confirmed since the batch started, whoever started it: the owner's
         # Apply, bulk Apply and apply-many runs are never in run_ids, so the batch showed 220 while 300+ were
         # confirmed and the owner could not tell whether the goal was met (2026-10-29).
-        confirmed_all = confirmed | confirmed_since(s, batch.get("started_at"))
+        confirmed_all = confirmed | confirmed_since(s, batch.get("started_at") and counting_from(batch.get("started_at"), service.config.timezone))
         batch_jobs = set(latest)
         controls = {
             row.key.removeprefix("job_control:"): row.value.get("state")
@@ -414,6 +427,7 @@ def replenish_discovery(service, unattempted):
 # Why a candidate waited in a tick rather than being refused (autopilot.screen), shown beside the refusals.
 WAITING = {
     "focus": "The job's platform is set aside by the saved platform focus",
+    "company_site": "A company's own site: AXIOM sends it only when you choose it in Job board > Company sites",
     "busy": "Another application at this employer is running or queued; this one starts when it ends",
     "tailoring": "Preparing a tailored resume; it starts when ready",
 }
@@ -460,15 +474,27 @@ def start_batch(db, target=100):
     return batch
 
 
+def apply_daily_limit(db, limit):
+    """The daily limit is the only goal: Settings › Limits › Applications per day (config.daily_application_limit), also the
+    number on the Overview. A change there reaches the running batch's target and the saved batch default at once, instead of the
+    batch keeping the number it started with."""
+    board = db.get_setting("job_board_settings", {}) or {}
+    if board.get("batch_target") != limit:
+        db.set_setting("job_board_settings", {**board, "batch_target": limit})
+    batch = db.get_setting("job_board_autopilot", {}) or {}
+    if batch.get("state") == "active" and batch.get("target") != limit:
+        db.set_setting("job_board_autopilot", {**batch, "target": limit})
+
+
 def persist_batch(db, batch):
     current = db.get_setting("job_board_autopilot", {})
     if current.get("started_at") == batch["started_at"]:
         # queue() committed these IDs before dispatch; never overwrite its durable outbox on an error.
         batch["run_ids"] = list(dict.fromkeys([*current.get("run_ids", []), *batch["run_ids"]]))
         batch["queued"] = len(batch["run_ids"])
-        # A goal the owner raised while this tick ran is kept: the tick wrote back its stale copy and the raise to 477
-        # was lost (2026-10-29).
-        batch["target"] = max(batch.get("target", 0), current.get("target", 0))
+        # A goal changed while this tick ran is kept (the newest writer wins, up or down): the tick wrote back its stale copy and
+        # a raise to 477 was lost (2026-10-29). The goal is the daily limit (apply_daily_limit).
+        batch["target"] = current.get("target", batch.get("target", 0))
     db.set_setting("job_board_autopilot", batch)
 
 
@@ -811,9 +837,41 @@ async def owner_requests_only(service):
     from .owner_apply import due
     from .pipeline_comparison import NORMAL, pool_capacity
 
+    from .pipeline_comparison import CUSTOM
+
     with service.db.session() as s:
+        # Each pool is scheduled on its own: a full normal pool must not stop a company-site request (due() skips a full lane's jobs).
         room = pool_capacity(s, NORMAL, service.config.topology).available
+        room += pool_capacity(s, CUSTOM, service.config.topology).available
     return await due(service, room)
+
+
+# Ranked jobs waiting for review before ranking pauses: a person who hasn't looked for a week shouldn't pay to rank a week of postings.
+REVIEW_POOL = 200
+
+
+async def rank_for_review(service, cfg):
+    """With automatic applying off the dispatcher starts nothing by itself, but a review batch and Best matches still need jobs ranked.
+    Ranking lived only further down the tick, so an install with automatic applying off left every job on "Checking fit" for good
+    (2026-11-01). Nothing is sent here, and no tailored resume is asked for. The ranking queue dedups, so a tick costs one read."""
+    from .execution_services import enabled as services_enabled
+    from .features.discovery import discover_due, policy_for
+    from .workers import enqueue_classification
+
+    db = service.db
+    if not cfg.enabled or not services_enabled(db):
+        return
+    try:
+        with db.session() as s:
+            waiting = s.scalar(select(func.count()).select_from(Job).where(Job.status == "ready", Job.demo.is_(False), Job.id.not_in(select(Run.job_id))))
+            if waiting >= REVIEW_POOL:
+                return
+            attempted = attempted_job_ids(s)
+        policy = policy_for(db).model_copy(update={"owners": service.config.workers})
+        due = await asyncio.to_thread(discover_due, db, policy)
+        await enqueue_classification(classification_ids(due, attempted))
+    except Exception as exc:  # The next tick asks again; ranking must not stop what the tick has already done.
+        logging.getLogger(__name__).warning("Ranking for review did not run: %s", type(exc).__name__)
 
 
 def classification_ids(due_work, attempted, limit=None):
@@ -899,6 +957,11 @@ def screen_job(db, cfg, owner_profile, job, busy, *, board_ids, integrated, use_
         # Owner focus: platforms set aside for now are not dispatched.
         if current.ats in set(db.get_setting("ats_focus", {}).get("exclude", [])):
             return "focus", None, None
+        from .company_sites import allowed, is_company_site
+
+        # A company's own site waits for the owner to send it (Job board > Company sites); the batch never starts one.
+        if is_company_site(current.ats) and not allowed(s, jid):
+            return "company_site", None, None
         from .features.discovery.roles import role_fits
 
         if target_roles and not role_fits(current.title, target_roles):
@@ -957,11 +1020,11 @@ def screen_job(db, cfg, owner_profile, job, busy, *, board_ids, integrated, use_
 async def tick(service):
     db, cfg = service.db, settings(service.db)
     control = db.get_setting("control", {})
-    if (
-        control.get("paused")
-        or not control.get("auto_submit")
-        or not service.dispatch
-    ):
+    if control.get("paused") or not service.dispatch:
+        return
+    if not control.get("auto_submit"):
+        if not cfg.auto_apply:
+            await rank_for_review(service, cfg)
         return
     if not hasattr(service, "autopilot_lock"):
         service.autopilot_lock = asyncio.Lock()
@@ -970,12 +1033,16 @@ async def tick(service):
         # or a busy mail sender was promised "it starts on its own" and never did (2026-10-21).
         async with service.autopilot_lock:
             await owner_requests_only(service)
+        await rank_for_review(service, cfg)
         return
     async with service.autopilot_lock:
-        batch = db.get_setting("job_board_autopilot") or start_batch(db, cfg.batch_target)
+        batch = db.get_setting("job_board_autopilot") or start_batch(db, service.config.daily_application_limit)
         if batch.get("state") != "active":
             await owner_requests_only(service)
             return
+        # The goal is the daily limit, whichever screen or file set it last.
+        batch["target"] = service.config.daily_application_limit
+        since = counting_from(batch.get("started_at"), service.config.timezone)
         with db.session() as s:
             owned_jobs = select(Run.job_id).where(Run.id.in_(batch["run_ids"]))
             # Every confirmation since the batch started counts toward its goal, whoever started it (Apply, bulk
@@ -986,11 +1053,12 @@ async def tick(service):
                         select(Run.job_id).distinct().where(
                             Run.job_id.in_(owned_jobs),
                             Run.state == "confirmed",
+                            Run.created_at >= since,
                             Run.receipt["evidence_reconciliation"].as_string().is_distinct_from("pending"),
                         )
                     )
                 )
-                | confirmed_since(s, batch.get("started_at"))
+                | confirmed_since(s, batch.get("started_at") and since)
             )
             # A count: the whole rows (packets and descriptions) were read here every 15 s only to be counted.
             active = s.scalar(
@@ -1013,7 +1081,11 @@ async def tick(service):
             )
         batch.update(confirmed=confirmed, last_tick=now())
         if confirmed >= batch["target"]:
-            batch.update(state="complete", finished_at=now())
+            # Today's limit is met. The batch ends; tomorrow needs another Start (the screen says so).
+            batch.update(
+                state="complete", finished_at=now(),
+                finished_day=datetime.now(ZoneInfo(service.config.timezone)).date().isoformat(),
+            )
             persist_batch(db, batch)
             return
         from .provider_health import dispatch_gate

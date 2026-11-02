@@ -36,6 +36,9 @@ FINAL_REFUSALS = {
 FRESH_TRY = {"application_retry_limit", "application_deadline"}
 
 
+VIDEO_CLOSING = "This application requires a video recording of you, and the app can't record or upload video"
+
+
 class ReviewsMixin:
     @staticmethod
     def review_kind(question):
@@ -57,6 +60,17 @@ class ReviewsMixin:
         if reason.startswith(("Model omitted", "Unverifiable answer", "Model output", "Model unavailable")):
             return "model_output"
         return "missing_fact" if question.get("key") not in {"manual", "session"} else "account"
+
+    @staticmethod
+    def video_required(question):
+        """True for a required field asking for a recording of the applicant (see owner_questions.cannot_automate)."""
+        from .. import owner_questions as oq
+
+        if not question.get("required", True):
+            return False
+        return bool(oq.cannot_automate(
+            question.get("question", ""), question.get("options") or [], oq.context_from(question), question.get("reason", "")
+        )[1])
 
     async def resume_mail_wait(self, run_id, challenge_id, *, restart_verification=False):
         """A matched challenge wakes its approved draft once, without exposing the payload."""
@@ -311,6 +325,39 @@ class ReviewsMixin:
                     pass  # The owner's answer is saved; the others are still asked as before.
         return result
 
+    async def resolve_reviews(self, review_ids, answer):
+        """One answer to every row of the same question in one request (the web app's Send to N applications).
+
+        Owner 2026-11-01: "the needs answer section is again too much laggy". The page sent one request per row, each answered
+        under the database lock and each followed by its own pass over every open question (settle_open_questions). A question
+        asked by twelve applications was twelve round trips and twelve passes; here it is one of each."""
+        sent, failure, message = 0, None, None
+        for review_id in dict.fromkeys(review_ids):
+            try:
+                result = await self.resolve_review(review_id, answer, settle=False)
+                message = result.get("message", message)
+                sent += 1
+            except ValueError as exc:
+                if re.search(r"already answered|no longer exists", str(exc), re.I):
+                    sent += 1
+                else:
+                    failure = failure or exc
+        if sent:
+            with self.db.session() as s:
+                review = s.get(Review, review_ids[0])
+                run = s.get(Run, review.run_id) if review else None
+                job = s.get(Job, run.job_id) if run else None
+                question, employer = (review.question, (job.company or "") if job else "") if review else ("", "")
+            if question:
+                try:
+                    await self.settle_open_questions(only=(question, employer))
+                except Exception:
+                    pass  # The answers are saved; the others are still asked as before.
+        if failure and not sent:
+            raise failure
+        return {"resolved": True, "sent": sent, "of": len(set(review_ids)), "message": message,
+                **({"failed": str(failure)} if failure else {})}
+
     async def settle_open_questions(self, only=None, documents_only=False):
         """Answer open questions the owner already answered for another job, worded the same. No model call.
 
@@ -475,6 +522,10 @@ class ReviewsMixin:
                 if FOREIGN_POSTING.search(oq.tidy(question))
                 else "The role is in another country (a German-language posting: " + job.title[:80] + ")"
                 if GERMAN_ROLE.search(job.title or "")
+                # A required recording of the applicant (Solace Health, 2026-11-01): no answer can stand in for it. A required
+                # file stays with the person, who may have one to add.
+                else VIDEO_CLOSING
+                if oq.cannot_automate(question, options, context, reason or "")[1]
                 else None
             )
             problem = None if closing else oq.defect(question, options, context, reason or "")

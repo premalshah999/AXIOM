@@ -1,6 +1,7 @@
 """/api/v2/resumes — artifacts, evidence inventory, prepare/cancel."""
 
 import asyncio
+import copy
 import os
 from datetime import UTC, datetime
 from typing import Literal
@@ -38,6 +39,9 @@ class PolicyInput(BaseModel):
 def router(service) -> APIRouter:
     db, config = service.db, service.config
     r = APIRouter(prefix="/api/v2/resumes", tags=["resumes"])
+    from . import tailor_routes
+
+    tailor_routes.add(r, service)
 
     def version_facts(s, rows) -> dict:
         """What tells one version from another: the job it was made for, and whether an application went out with it.
@@ -288,7 +292,24 @@ def router(service) -> APIRouter:
             f.write(result.pdf)
         os.chmod(path, 0o600)
         validation = {k: v for k, v in check.items() if k != "text"}
+        derived_policy = editor.EDITOR_VERSION
+        if data.base_artifact_id:
+            with db.session() as s:
+                base = s.get(RsArtifact, data.base_artifact_id)
+                inherited = copy.deepcopy(base.validation or {}) if base else {}
+            # A different editor does not erase project approval provenance.
+            # Its content is still rechecked below, against the same source.
+            for key in ("mode", "source_doc", "allowed_skills", "added_projects", "preview_projects", "drafts", "removed_projects", "report"):
+                if key in inherited:
+                    validation[key] = inherited[key]
+            if inherited.get("source_doc") and data.job_id:
+                from .modes import REVIEW_POLICY
+                derived_policy = REVIEW_POLICY
         validation["edited_by"] = "applicant"
+        if data.job_id:
+            from .tailor_routes import editor_rules
+
+            validation["rules"] = editor_rules(db, data, result.pdf)
         validation["editor"] = {
             "doc": doc.model_dump() if doc else None,
             "style": data.style.model_dump(),
@@ -310,7 +331,7 @@ def router(service) -> APIRouter:
                     job_id=data.job_id,
                     employer_id=employer_id,
                     description_sha=dsha,
-                    policy_version=editor.EDITOR_VERSION,
+                    policy_version=derived_policy,
                     pdf_sha=sha256_bytes(result.pdf),
                     pdf_path=rel,
                     text=check["text"][:20000],

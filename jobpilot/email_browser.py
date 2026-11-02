@@ -146,10 +146,41 @@ class EmailBrowser:
         self.engine = engine
         self.mail = engine.service.mail
         self.rule = self.mail.rule_for(engine.job["url"])
+        self.bound = self.identity()
+        self.rebound = False
         self.challenge_id = None
         self.attempts = 0
         self.secret_fields = []
         self.deferred = False
+
+    def identity(self):
+        job = self.engine.job
+        return (job.get("url"), job.get("ats"))
+
+    def rebind(self):
+        """The employer's site handed off to its platform (browser.adopt_handoff): the job URL and platform changed, so the
+        rule cached here is the career site's, whose senders are not the platform's (Databricks and OneImaging ran on
+        Greenhouse holding a custom rule). An open request keeps the rule it was armed with."""
+        if not hasattr(self, "bound") or self.identity() == self.bound or self.challenge_id:
+            return False
+        self.bound = self.identity()
+        self.rebound = False
+        self.rule = self.mail.rule_for(self.engine.job["url"])
+        self.rebound = True
+        return True
+
+    async def bind_rule(self):
+        """Before any request: a rule that predates a hand-off becomes the platform's tenant-bound rule (ensure_rule gives
+        a saved rule its platform's senders, or builds one from the platform's family)."""
+        self.rebind()
+        if not getattr(self, "rebound", False) or self.challenge_id:
+            return
+        self.rebound = False
+        job = self.engine.job
+        if job.get("demo"):
+            return
+        email = self.engine.run_record["packet"]["profile"]["email"]
+        self.rule = await self.mail.ensure_rule(job, email) or self.rule
 
     def state(self, observation):
         from .adapters.base import code_label
@@ -274,6 +305,7 @@ class EmailBrowser:
                 await asyncio.sleep(min(1, max(0, deadline - time.monotonic())))
 
     async def prepare_submission(self, kind="auto"):
+        await self.bind_rule()
         if not self.rule or self.challenge_id:
             return
         await self.acquire(kind)
@@ -383,6 +415,7 @@ class EmailBrowser:
     async def before_click(self, control_id):
         if self.challenge_id:
             return
+        await self.bind_rule()
         obs = await self.engine.form.scan()
         button = next((b for b in obs["controls"] if b["id"] == control_id), None)
         delivery = bool(
@@ -486,6 +519,7 @@ class EmailBrowser:
 
     async def handle(self):
         e = self.engine
+        await self.bind_rule()
         obs = await e.form.scan()
         kind, fields = self.state(obs)
         if (

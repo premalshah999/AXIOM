@@ -31,7 +31,8 @@ class BoardSettings(BaseModel):
     early_career_only: bool = False  # A setup choice; see Setup › Job board.
     web_search: bool = True
     auto_apply: bool = False
-    batch_target: int = Field(default=100, ge=1, le=500)
+    batch_target: int = Field(default=100, ge=1, le=1000)
+    review_size: int = Field(default=25, ge=5, le=100)  # how many jobs a review batch gathers (review_batch.py)
     minimum_auto_fit: int = Field(default=70, ge=0, le=100)
     max_age_hours: Literal[48, 168, 720] = 720
     # Postings read from a public board API (Greenhouse, Ashby, Lever, SmartRecruiters) are live when listed, so their

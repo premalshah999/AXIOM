@@ -48,6 +48,8 @@ export function Table<T>({
   canSelect,
   busy,
   rowLabel,
+  selectAll,
+  idle,
 }: {
   columns: Column<T>[];
   rows: T[];
@@ -74,6 +76,10 @@ export function Table<T>({
   busy?: boolean;
   /** Accessible name for a row's checkbox ("Select ExampleSoft"). */
   rowLabel?: (row: T) => string;
+  /** "Select all 312": every row the filters show, on any page. The head's checkbox takes this page. The line stays in view while this is here. */
+  selectAll?: { count: number; run: () => void; busy?: boolean };
+  /** Shown on the bulk line while nothing is selected. */
+  idle?: ReactNode;
 }) {
   const selectable = !!onSelectedChange;
   const chosen = selected ?? new Set<string>();
@@ -89,14 +95,25 @@ export function Table<T>({
   const state = error ? "error" : loading && rows.length === 0 ? "loading" : rows.length === 0 ? "empty" : "rows";
   return (
     <div className={"ax-table-wrap" + (fill ? " is-fill" : "")}>
-      {selectable && chosen.size > 0 && (
+      {selectable && (chosen.size > 0 || !!selectAll?.count) && (
         <div className="ax-bulk" role="status">
-          <span>{chosen.size} selected</span>
-          <div className="ax-bulk-actions">
-            {bulk}
-            <Button size="sm" variant="ghost" onClick={() => onSelectedChange?.(new Set())}>
-              Clear
+          {chosen.size > 0 && <span>{chosen.size.toLocaleString()} selected</span>}
+          {!!selectAll?.count && chosen.size < selectAll.count && (
+            <Button size="sm" variant="secondary" loading={selectAll.busy} onClick={selectAll.run}>
+              {`Select all ${selectAll.count.toLocaleString()}`}
             </Button>
+          )}
+          <div className="ax-bulk-actions">
+            {chosen.size > 0 ? (
+              <>
+                {bulk}
+                <Button size="sm" variant="ghost" onClick={() => onSelectedChange?.(new Set())}>
+                  Clear
+                </Button>
+              </>
+            ) : (
+              idle
+            )}
           </div>
         </div>
       )}
@@ -113,13 +130,21 @@ export function Table<T>({
                 <th className="is-check" scope="col">
                   <input
                     type="checkbox"
-                    aria-label="Select all rows"
+                    aria-label="Select all rows on this page"
                     disabled={keys.length === 0}
                     checked={all}
                     ref={(el) => {
                       if (el) el.indeterminate = some;
                     }}
-                    onChange={() => onSelectedChange?.(all ? new Set() : new Set(keys))}
+                    // This page's rows go in or out; what is selected on other pages stays selected.
+                    onChange={() => {
+                      const next = new Set(chosen);
+                      for (const k of keys) {
+                        if (all) next.delete(k);
+                        else next.add(k);
+                      }
+                      onSelectedChange?.(next);
+                    }}
                   />
                 </th>
               )}

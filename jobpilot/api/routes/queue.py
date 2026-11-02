@@ -19,7 +19,7 @@ from ...db import Job, Run, Setting
 from ...discovery import add_job, read_added_posting
 from ...link_intake import URL_REFUSALS, prepare
 from ...network import public_url
-from ...owner_apply import KEY, MANY, apply, restore
+from ...owner_apply import KEY, REFUSED_HOLDS, apply, restore
 from ...schemas import JobInput
 
 MAX_LINKS = 25
@@ -28,6 +28,7 @@ LINK = re.compile(r"https?://\S+", re.I)
 
 class QueueLinks(BaseModel):
     urls: list[str] = Field(min_length=1, max_length=MAX_LINKS)
+    tailor_mode: str | None = Field(default=None, max_length=40)  # Apply with a tailored resume, in this mode. None is plain Apply, the default.
 
     @field_validator("urls")
     @classmethod
@@ -41,8 +42,20 @@ class QueueLinks(BaseModel):
         return cleaned
 
 
-class AddMany(BaseModel):
-    job_ids: list[str] = Field(min_length=1, max_length=MANY)
+class ManyJobs(BaseModel):
+    # A Select all across every page. Nothing starts here, so this isn't the Apply path's limit of fifty a request (owner_apply.MANY):
+    # each job is one write, and a board of hundreds refused with a 422 is what "select all" must never do.
+    job_ids: list[str] = Field(min_length=1, max_length=5000)
+
+
+class Accept(BaseModel):
+    batch_id: str = Field(min_length=1, max_length=64)
+    job_ids: list[str] = Field(default_factory=list, max_length=100)
+    unticked: list[str] = Field(default_factory=list, max_length=100)
+
+
+class Size(BaseModel):
+    size: int = Field(ge=5, le=100)
 
 
 JOB_COLUMNS = (Job.id, Job.title, Job.company, Job.url, Job.ats, Job.status)
@@ -60,7 +73,7 @@ def router(service) -> APIRouter:
     def queue_view(page: int = 1, size: int = 25):
         """Queue: what is running with the step it is on, then every job the dispatcher will start, in the order it starts them
         (queue_order.py), one page at a time; then what it is retrying by itself. A `def` route: this reads on a worker thread."""
-        from ...queue_order import active_rows, plans
+        from ...queue_order import active_rows, dispatching, plans
 
         planner = plans(service)
         value = planner.ready(service)
@@ -71,7 +84,7 @@ def router(service) -> APIRouter:
             # A cold start: what is running paints now, the line follows on the next poll.
             return {
                 "at": "", "planning": True, "paused": bool(control.get("paused")), "auto_submit": bool(control.get("auto_submit")),
-                "auto_apply": bool(board.get("enabled") and board.get("auto_apply")), "stopped": None,
+                "auto_apply": bool(board.get("enabled") and board.get("auto_apply")), "dispatching": dispatching(db), "stopped": None,
                 "workers": {**{k: getattr(config.topology, k) for k in ("normal", "specialist", "custom")}, "free": 0},
                 "decides": "", "exact": 0, "running": running, "next": [], "total": 0, "page": 1, "pages": 1, "size": size,
                 "retrying": planner.retrying(service), "held": [], "held_total": 0, **_requests(),
@@ -80,19 +93,25 @@ def router(service) -> APIRouter:
         size = max(1, min(100, int(size)))
         pages = max(1, -(-len(items) // size))
         page = max(1, min(int(page), pages))
-        drop = {"employer", "lane", "details", "status", "tailoring", "not_before", "front"}
+        drop = {"employer", "lane", "details", "status", "tailoring", "not_before", "front", "paced"}
         reading = value["reading"]
+        from ...features.resumes.choice import waiting_words
+
+        shown = items[(page - 1) * size : page * size]
+        tailoring = waiting_words(db, [item["id"] for item in shown])
+        shown = [{**item, "wait": tailoring[item["id"]]} if item["id"] in tailoring else item for item in shown]
         return {
             "at": value["at"],
             "paused": bool(control.get("paused")),
             "auto_submit": bool(control.get("auto_submit")),
             "auto_apply": bool(board.get("enabled") and board.get("auto_apply")),
+            "dispatching": dispatching(db),
             "stopped": reading.get("stopped"),
             "workers": {**{k: getattr(config.topology, k) for k in ("normal", "specialist", "custom")}, "free": value["free"]},
             "decides": value["decides"],
             "exact": value["exact"],
             "running": running,
-            "next": [{k: v for k, v in item.items() if k not in drop} for item in items[(page - 1) * size : page * size]],
+            "next": [{k: v for k, v in item.items() if k not in drop} for item in shown],
             "total": len(items),
             "page": page,
             "pages": pages,
@@ -134,6 +153,11 @@ def router(service) -> APIRouter:
             for job_id, value in requests.items()
             if job_id in jobs and job_id not in running
         ]
+        from ...features.resumes.choice import waiting_words
+
+        # The reason is what the last try found, so it can still say "Preparing" after the resume was made.
+        words = waiting_words(db, [item["job_id"] for item in waiting])
+        waiting = [{**item, "reason": words[item["job_id"]]} if item["job_id"] in words else item for item in waiting]
         waiting.sort(key=lambda item: item["requested_at"])
         return {"active": active, "waiting": waiting}
 
@@ -151,15 +175,16 @@ def router(service) -> APIRouter:
         return {
             "rows": [{k: item.get(k) for k in keep} for item in items[(page - 1) * size : page * size]],
             "total": len(items), "page": page, "pages": pages, "size": size, "held": value.get("held", []),
+            "selectable": sum(1 for item in items if item["hold"]["code"] not in REFUSED_HOLDS and item["hold"]["code"] != "reserved"),
         }
 
-    def changed(job_id):
-        """Every list reads the move at once: the reading forgets the job, and the next poll replays the line."""
+    def changed(*job_ids):
+        """Every list reads the move at once: the reading forgets the jobs, and the next poll replays the line."""
         from ...board_view import board
         from ...queue_order import plans
         from ...startable import reading as read_held
 
-        read_held(service).drop([job_id])
+        read_held(service).drop(list(job_ids))
         plans(service).now(service)
         board(service).stale()
 
@@ -182,21 +207,73 @@ def router(service) -> APIRouter:
         changed(job_id)
         return result
 
-    @r.post("/api/queue/add-many")
-    def add_many(data: AddMany):
-        """Put the ticked jobs in line, one by one, each as its own add."""
-        from ...owner_apply import enqueue
+    def many(job_ids, front=False):
+        """Put the ticked jobs in line, each decided as its own click (owner_apply.enqueue_many); `message` says what became of them."""
+        from ...owner_apply import enqueue_many
 
-        added = refused = 0
-        for job_id in data.job_ids:
-            try:
-                enqueue(service, job_id)
-                added += 1
-            except ValueError:
-                refused += 1
-        if data.job_ids:
-            changed(data.job_ids[0])
-        return {"added": added, "refused": refused}
+        out = enqueue_many(service, job_ids, front=front)
+        if out["added"]:
+            changed(*out["added"])
+        added, already, refused = len(out["added"]), len(out["already"]), len(out["refused"])
+        parts = [f"{added:,} {'job' if added == 1 else 'jobs'} {'moved to the front of' if front else 'added to'} the queue."] if added or not refused else []
+        if already:
+            parts.append(f"{already:,} already in line, running or applied.")
+        if refused:
+            parts.append(f"{refused:,} couldn't be queued. Each says why.")
+        return {"added": added, "already": already, "refused": out["refused"], "message": " ".join(parts)}
+
+    @r.post("/api/queue/add-many")
+    def add_many(data: ManyJobs):
+        return many(data.job_ids)
+
+    @r.post("/api/queue/company-sites")
+    def company_sites(data: ManyJobs):
+        """Job board > Company sites: the owner sends these on purpose, one row's Apply or Select all in that section. Nothing else
+        puts a company's own site in line (company_sites.py), so the choice is remembered here, then each job is decided as a click."""
+        from ...company_sites import allow
+
+        allow(db, data.job_ids)
+        return many(data.job_ids)
+
+    @r.post("/api/queue/front-many")
+    def front_many(data: ManyJobs):
+        return many(data.job_ids, front=True)
+
+    @r.get("/api/queue/ids")
+    def queue_ids():
+        """Every job in line, in order: what Select all on Up next selects, whichever page is showing."""
+        from ...queue_order import plans
+
+        value = plans(service).ready(service)
+        return {"ids": [item["id"] for item in (value or {}).get("next", [])]}
+
+    @r.get("/api/queue/held/ids")
+    def held_ids(code: str = ""):
+        """Every job held back for this reason: what Select all on Held back selects."""
+        from ...startable import reading as read_held, rows as ready_rows
+
+        items = ready_rows(db, read_held(service).get(service), "held", code[:40])
+        return {"ids": [item["id"] for item in items if item["hold"]["code"] not in REFUSED_HOLDS and item["hold"]["code"] != "reserved"]}
+
+    @r.get("/api/review-batch")
+    def review_batch():
+        """The open review batch, gathered when there is none. A `def` route: this reads on a worker thread."""
+        from ...review_batch import current
+
+        return current(service)
+
+    @r.post("/api/review-batch/accept")
+    def review_accept(data: Accept):
+        """Queue the ticked jobs of this batch and prepare the next."""
+        from ...review_batch import accept
+
+        return accept(service, data.batch_id, data.job_ids, data.unticked, lambda ids: changed(*ids))
+
+    @r.post("/api/review-batch/size")
+    def review_size(data: Size):
+        from ...review_batch import resize
+
+        return resize(service, data.size)
 
     @r.post("/api/queue/{job_id}/back")
     async def back_in_queue(job_id: str):
@@ -236,24 +313,34 @@ def router(service) -> APIRouter:
                 if created:
                     # The posting's text arrives in the background; queueing does not wait for it.
                     asyncio.create_task(read_added_posting(db, config, row["id"]))
+                if data.tailor_mode and data.tailor_mode != "off":
+                    # Before it's queued, or a free worker would send the uploaded resume first.
+                    from ...features.resumes import choice as tailor_choice
+
+                    if await asyncio.to_thread(tailor_choice.choose, db, row["id"], data.tailor_mode):
+                        tailor_choice.start(db, config, row["id"])
                 if row["status"] == "archived":
                     # Pasting the link again is the owner asking for it again. A removed job comes back unless an
                     # application may have reached the employer or it asked for an identifier (restore says which).
                     await asyncio.to_thread(restore, service, row["id"])
+                # A link the owner pastes is their own choice, a company's own site included (company_sites.py).
+                from ...company_sites import allow
+
+                await asyncio.to_thread(allow, db, [row["id"]])
                 outcome = await apply(service, row["id"])
                 results.append({"url": url, "job_id": row["id"], "created": created, **outcome, **({"resolved_url": link} if link != url else {})})
             except QueueBlocked as exc:
                 results.append({"url": url, "state": "refused", "message": str(exc)})
+            except LookupError as exc:  # The mode isn't available, or this job has already started.
+                results.append({"url": url, "state": "refused", "message": str(exc)[:300]})
             except (ValueError, HTTPException) as exc:
                 detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
                 results.append({"url": url, "state": "refused", "message": URL_REFUSALS.get(str(detail), str(detail))[:300]})
         return {"results": results}
 
-    @r.delete("/api/queue/{job_id}")
-    async def withdraw(job_id: str):
-        """Take a job out of the line, for good until the user puts it back: its waiting request goes, and a pause keeps the
-        dispatcher from starting it again by itself (removing only the request left a Ready job for the next tick to start). A
-        running application is stopped from its own page instead."""
+    async def take_out(job_id):
+        """Out of the line, for good until the user puts it back: its waiting request goes, and a pause keeps the dispatcher from starting
+        it again by itself (removing only the request left a Ready job for the next tick to start). False when it wasn't in line."""
         from ...job_control import manage
         from ...startable import reading as read_held
 
@@ -267,9 +354,24 @@ def router(service) -> APIRouter:
                 return row is not None or in_line
 
         if not await asyncio.to_thread(waiting):
-            raise HTTPException(status_code=404, detail="This job is not waiting in the queue")
+            return False
         await manage(service, job_id, "pause")
+        return True
+
+    @r.delete("/api/queue/{job_id}")
+    async def withdraw(job_id: str):
+        """Take a job out of the line. A running application is stopped from its own page instead."""
+        if not await take_out(job_id):
+            raise HTTPException(status_code=404, detail="This job is not waiting in the queue")
         await asyncio.to_thread(changed, job_id)
         return {"removed": True, "job_id": job_id}
+
+    @r.post("/api/queue/remove-many")
+    async def remove_many(data: ManyJobs):
+        """Take the ticked jobs out of the line; one that has already started is left to its own page, and counted as such."""
+        removed = [job_id for job_id in dict.fromkeys(data.job_ids) if await take_out(job_id)]
+        if removed:
+            await asyncio.to_thread(changed, *removed)
+        return {"removed": len(removed), "not_in_line": len(set(data.job_ids)) - len(removed)}
 
     return r

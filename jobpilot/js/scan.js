@@ -527,9 +527,27 @@
     const r = el.getBoundingClientRect(), box = dialog.getBoundingClientRect(), middle = r.left + r.width / 2;
     return r.width >= 10 && r.height >= 10 && middle >= box.left && middle <= box.right;
   };
+  // Meta's application page (2026-11-01) wraps the whole app, header and form, in one aria-hidden="true" div with no modal
+  // anywhere: the scan found none of its 40 controls. A wrapper on screen that holds nearly every control the page has,
+  // with nothing open over it, is the page, not something hidden from it. A small hidden section of a page (a step, a
+  // honeypot, a mirror) holds few controls or leaves the rest of the page outside it.
+  const wholePageCache = new Map();
+  const wholePage = h => {
+    if (!wholePageCache.has(h)) {
+      let whole = false;
+      if (h.tagName !== 'BODY' && !h.matches('[inert]') && visible(h) && !anyModalOpen()) {
+        const CONTROLS = 'input:not([type=hidden]),select,textarea,button,a[href]';
+        let inside = 0, outside = 0;
+        for (const n of document.querySelectorAll(CONTROLS)) if (visible(n)) h.contains(n) ? inside++ : outside++;
+        whole = inside >= 8 && outside * 4 <= inside;
+      }
+      wholePageCache.set(h, whole);
+    }
+    return wholePageCache.get(h);
+  };
   const hiddenBy = el => {
     for (let h = el.closest('[inert],[aria-hidden="true"]'); h; h = h.parentElement?.closest('[inert],[aria-hidden="true"]')) {
-      if (shownInDialog(h, el)) continue;
+      if (shownInDialog(h, el) || wholePage(h)) continue;
       if (h.matches('[inert]') || !h.matches(MODAL_HIDE) || anyModalOpen()) return h;
     }
     return null;
@@ -874,7 +892,9 @@
   }
   for (const [name, all_] of Object.entries(boxNames)) {
     if (all_.length < 2 || excluded(all_[0]) || consumed.has(all_[0])) continue;
-    const shown = all_.filter(c => visible(c) || (c.labels && c.labels[0] && visible(c.labels[0])));
+    // Rippling's box is a zero-size input inside a visible role=checkbox row (DESRI 2026-11-01): without the row both Yes/No
+    // answers were each a lone "Unlabelled field" and the question's words were never read.
+    const shown = all_.filter(c => visible(c) || (c.labels && c.labels[0] && visible(c.labels[0])) || visible(c.closest('[role=checkbox]')));
     if (!shown.length) continue;
     // Atlas Copco's SAP sign-up form (2026-10-31) keeps hidden copies of "Receive new job posting notifications" from its
     // other screens under the same name: the group read as three boxes ("*", "*", the caption) with no question, and the

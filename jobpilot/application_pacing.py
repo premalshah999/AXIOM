@@ -16,7 +16,7 @@ from .admission import QueueBlocked, active_runs, employer_partition
 from .db import Job, Run, Setting
 from .features.knowledge.employers import name_aliases, tenant_alias
 from .employer_limit import application_cap as application_cap  # the employer's own limit, read from what it says
-from .employer_limit import wait_until, waiting_sentence
+from .employer_limit import covers, wait_until, waiting_sentence
 from .features.knowledge.tables import KnAlias
 
 ASHBY_GAP = 150
@@ -191,6 +191,7 @@ def require_ats_admission(session, job, run_id=None, owner_pick=False, email_con
             outcome="deferred",
             code="ats_pacing",
             not_before=datetime.fromtimestamp(_stamp(None) + 60, UTC).isoformat(),
+            detail={"pace": "limit", "limit": limit},
         )
     site_limit = SITE_LIMITS.get(_get(job, "ats"))
     if site_limit and _site_active(session, job, run_id, ["queued", "running", "submitting"]) >= site_limit:
@@ -199,6 +200,7 @@ def require_ats_admission(session, job, run_id=None, owner_pick=False, email_con
             outcome="deferred",
             code="ats_pacing",
             not_before=datetime.fromtimestamp(_stamp(None) + 60, UTC).isoformat(),
+            detail={"pace": "site"},
         )
     ats = _get(job, "ats")
     if ats not in START_GAPS:
@@ -211,6 +213,7 @@ def require_ats_admission(session, job, run_id=None, owner_pick=False, email_con
             outcome="deferred",
             code="ats_pacing",
             not_before=until,
+            detail={"pace": "throttle"},
         )
     for other, employer in active_runs(session, ("queued", "running", "submitting"), ats=ats):
         if other.id != run_id and not _exempt(employer, other):
@@ -219,6 +222,7 @@ def require_ats_admission(session, job, run_id=None, owner_pick=False, email_con
                 outcome="deferred",
                 code="ats_pacing",
                 not_before=datetime.fromtimestamp(at + 60, UTC).isoformat(),
+                detail={"pace": "busy"},
             )
     saved = session.get(Setting, gap_key(ats))
     if saved and saved.value.get("run_id") != run_id:
@@ -229,6 +233,7 @@ def require_ats_admission(session, job, run_id=None, owner_pick=False, email_con
                 outcome="deferred",
                 code="ats_pacing",
                 not_before=datetime.fromtimestamp(available, UTC).isoformat(),
+                detail={"pace": "gap", "seconds": START_GAPS[ats]},
             )
 
 
@@ -319,7 +324,7 @@ def cap_reason(company, cap):
     return f"{name} accepts at most {cap['limit']} applications{window}; this one was not submitted"
 
 
-def employer_cap_block(session, target):
+def employer_cap_block(session, target, job=None):
     """The refusal of an employer's stated limit still in force, whatever this app has counted: the applications that used
     it up may predate the app (TikTok refused with no confirmed application in the database, 2026-11-01). Or None."""
     row = session.get(Setting, EMPLOYER_CAP_PREFIX + target) if target else None
@@ -327,16 +332,20 @@ def employer_cap_block(session, target):
     until = cap.get("until")
     if not until or until <= datetime.now(UTC).isoformat():
         return None
+    if job is not None and not covers(cap, _get(job, "title", "")):
+        return None  # A limit on one recruitment project (new grads) does not hold the employer's other postings.
     return QueueBlocked(cap.get("sentence") or cap_reason(cap.get("company"), cap), outcome="deferred", code="employer_cap", not_before=until)
 
 
-def require_employer_cap(session, target, occupied):
+def require_employer_cap(session, target, occupied, job=None):
     """A refusal's limit holds until its period ends. One an earlier build saved has no end: it holds once this app has
     counted that many."""
-    if blocked := employer_cap_block(session, target):
+    if blocked := employer_cap_block(session, target, job):
         raise blocked
     row = session.get(Setting, EMPLOYER_CAP_PREFIX + target) if target else None
     cap = (row.value or {}) if row else {}
+    if job is not None and not covers(cap, _get(job, "title", "")):
+        return
     if not cap.get("limit") or "until" in cap or len(occupied) < int(cap["limit"]):
         return
     until = None
@@ -350,7 +359,23 @@ def require_employer_cap(session, target, occupied):
     )
 
 
-def require_company_limit(session, job, run_id=None):
+class _Counted(Exception):
+    pass
+
+
+def company_count(session, job):
+    """(applications the employer has, the user's limit), or None when no limit reads on this job. A request of several jobs at one
+    employer needs the number, not only whether this one is over."""
+    try:
+        require_company_limit(session, job, _count=True)
+    except _Counted as found:
+        return found.args
+    except QueueBlocked:
+        pass  # The employer's own stated limit: the dispatcher's reading says that one.
+    return None
+
+
+def require_company_limit(session, job, run_id=None, _count=False):
     """Cap unique confirmed postings plus pending submit admissions at three.
 
     Count current posting once, even when it appears in imported history. The
@@ -425,10 +450,12 @@ def require_company_limit(session, job, run_id=None):
         if identity(data.get("company", ""), data.get("url", "")) == target:
             confirmed.update(i for i in data.get("identities", []) if isinstance(i, str))
     occupied = (confirmed | reserved) - {current_identity}
-    require_employer_cap(session, target, occupied)
+    require_employer_cap(session, target, occupied, job)
     # Owner setting (2026-10-14): 1 = only employers with no earlier application.
     saved = session.get(Setting, LIMIT_KEY)
     limit = int((saved.value or {}).get("limit", COMPANY_LIMIT)) if saved else COMPANY_LIMIT
+    if _count:
+        raise _Counted(len(occupied), limit)
     if len(occupied) >= limit:
         permanent = len(confirmed - {current_identity}) >= limit
         raise QueueBlocked(

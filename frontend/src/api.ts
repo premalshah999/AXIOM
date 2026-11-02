@@ -5,6 +5,8 @@ export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    /** The answer's body, for a route that says more than its message. */
+    readonly data?: unknown,
   ) {
     super(message);
   }
@@ -69,7 +71,7 @@ export async function api<T = any>(
   if (!response.ok) {
     const message = detail(data, response.status);
     if (response.status === 401 && !CREDENTIAL_PATHS.has(path)) signedOut(message);
-    throw new ApiError(message, response.status);
+    throw new ApiError(message, response.status, data);
   }
   return data as T;
 }
@@ -135,6 +137,13 @@ export type QueueMove = { job_id: string; state: string; message: string };
 export const moveToFront = (jobId: string) => api<QueueMove>(`/queue/${jobId}/front`, "POST");
 /** Put a job from the board in the queue, as your own pick. */
 export const addToQueue = (jobId: string) => api<QueueMove>(`/queue/${jobId}/add`, "POST");
+/** What became of several jobs asked for at once: refusals come back one by one, each with its sentence (owner_apply.enqueue_many). */
+export type QueueMany = { added: number; already: number; refused: { job_id: string; company: string; title: string; reason: string }[]; message: string };
+export const addManyToQueue = (jobIds: string[]) => api<QueueMany>("/queue/add-many", "POST", { job_ids: jobIds });
+/** Company sites: the owner's own choice to send these (jobpilot/company_sites.py); nothing else puts one in line. */
+export const queueCompanySites = (jobIds: string[]) => api<QueueMany>("/queue/company-sites", "POST", { job_ids: jobIds });
+export const frontManyInQueue = (jobIds: string[]) => api<QueueMany>("/queue/front-many", "POST", { job_ids: jobIds });
+export const removeManyFromQueue = (jobIds: string[]) => api<{ removed: number; not_in_line: number }>("/queue/remove-many", "POST", { job_ids: jobIds });
 /** Take a job out of the queue until you put it back. */
 export const removeFromQueue = (jobId: string) => api<{ removed: boolean }>(`/queue/${jobId}`, "DELETE");
 /** Put a job you removed back in the queue. */

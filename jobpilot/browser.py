@@ -1601,6 +1601,11 @@ class BrowserEngine:
             original = Path(run["packet"]["resume_path"])
             if hashlib.sha256(original.read_bytes()).hexdigest() != run["packet"]["resume_sha"]:
                 raise RuntimeError("Selected resume changed since this run was queued")
+            # Approved when queued isn't enough: an edit since then needs a new approval.
+            from .features.resumes.choice import run_problem
+
+            if not job["demo"] and (held := run_problem(self.db, run["packet"])):
+                raise RuntimeError(held)
             resume = self.nice_resume(run)
             from .knowledge import KnowledgeBase
 
@@ -1617,6 +1622,8 @@ class BrowserEngine:
                 resume_artifact_id=run["packet"].get("resume_artifact_id"),
             )
             self.form = FormSession(page, resolver, resume, self.emit)
+            if run["packet"].get("owner_hands"):
+                self.form.owner_hands = True  # Take over's hand-back: the page's values are the owner's (forms.adopt_owner_values)
             self.form.on_checkpoint = self.checkpoint_draft
             self.form.network = NetworkMonitor(page)
             self.form.on_popup = self.prepare_popup
@@ -2056,6 +2063,8 @@ class BrowserEngine:
             if external and hasattr(self, "page"):
                 if self.retain_owned_draft():
                     await self.retain_desktop_draft()
+                    if self.steering():
+                        await self.hand_page_to_owner()
                     if self.releases_retained_tab() or getattr(self, "renderer_crashed", False):
                         # The saved route and checkpoint reopen this draft on its next run (the inactive-tab path).
                         # Every unfinished run kept its tab open: two Chrome profiles grew to 47 GB each on a 16 GB
@@ -2335,6 +2344,17 @@ class BrowserEngine:
             pass  # Corrupt/stale metadata cannot turn into a browser destination.
         return None
 
+    async def hand_page_to_owner(self):
+        """Take over: this tab is the owner's now. The page's submit guard (GUARD) stays in the live document after this run
+        lets go of it and would swallow the owner's own click on Submit, so it is lifted; the next run that resumes the tab
+        puts it back before it touches anything (prepare_page, GUARD)."""
+        for page in {self.page, getattr(getattr(self, "form", None), "page", self.page)}:
+            for frame in list(page.frames):
+                try:
+                    await asyncio.wait_for(frame.evaluate("window.__jpArmed = true"), 2)
+                except Exception:
+                    continue
+
     async def retain_desktop_draft(self):
         """Cleanup must not replace a completed result or its durable email wait."""
         cdp = None
@@ -2413,9 +2433,18 @@ class BrowserEngine:
         from .agent_settings import AgentDisabled
 
         if AnswerModelUnavailable.caused_by(exc):
+            from .provider_health import account_reason
+
+            try:
+                account = account_reason(self.db, self.config)
+            except Exception:
+                account = None  # The cause is only a label; it never changes what the run does next.
             return {
                 "state": "submission_unknown" if self.armed else "waiting_browser",
-                "reason": "The selected model provider is unavailable; draft retained without further model requests",
+                # The prefix stays what the own-trouble lists (application_budget, loop_guard) match; a refused key or an
+                # empty account then says what to do.
+                "reason": "The selected model provider is unavailable"
+                + (f": {account}" if account else "; draft retained without further model requests"),
                 "blocker_type": "site_transient",
                 "recovery_cause": "" if self.armed else "provider_unavailable",
                 "diagnostics": {"exception": type(exc).__name__},
@@ -2892,6 +2921,8 @@ class BrowserEngine:
             # The observed ATS owns the account and verification mail. Keeping
             # a short-link host here selects that host's unrelated sender rule.
             self.job.update(url=url or self.page.url, ats=target)
+        if verifier := getattr(self, "email_verification", None):
+            verifier.rebind()  # the job, its verifier and the saved platform change together
         self.persist_observed_ats(target)
 
     def starting_label(self, job):
@@ -4757,13 +4788,21 @@ class BrowserEngine:
             getattr(self.email_verification, "challenge_id", None)
         )
 
+    def steering(self):
+        """True for Take over's rebuilding run: its tab is kept open for the owner whatever the result."""
+        return bool(((getattr(self, "run_record", None) or {}).get("packet") or {}).get("steer"))
+
     def releases_retained_tab(self):
         """A retained draft whose tab may close: nothing was sent and no live wait needs the page. Uncertain submissions,
         email waits, pauses and dry runs keep theirs."""
+        if self.steering():
+            return False  # Take over: the owner works in this tab next (steer.py).
         return not self.armed and (self.result or {}).get("state") in RELEASED_TAB_STATES
 
     def retain_owned_draft(self):
         """Retain unfinished owned pages independently of paid retry admission."""
+        if self.steering() and (self.result or {}).get("state") not in {"confirmed", "already_applied"}:
+            return True
         return (self.result or {}).get("state") in {
             "waiting_browser",
             "waiting_answer",

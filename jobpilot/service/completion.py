@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from ..db import Event, Job, MailChallenge, Review, Run, Setting, now
 from ..run_trace import phase_timing
+from .reviews import VIDEO_CLOSING
 from .states import TERMINAL
 
 # Parked states an application can be in when the owner finishes it by hand.
@@ -107,6 +108,10 @@ class CompletionMixin:
         )
 
     def complete(self, run_id, result, elapsed):
+        from .. import steer
+
+        if steer.is_steer_run(self.db, run_id):
+            return steer.complete(self, run_id, result, elapsed)  # Take over: the owner has this application.
         with self.db.exclusive() as s:
             run = s.get(Run, run_id)
             if not run or run.state == "cancelled":
@@ -198,6 +203,16 @@ class CompletionMixin:
                     result = {
                         "state": "closed",
                         "reason": f"The employer hires only in its listed locations, and the applicant lives in {outside}",
+                        "blocker_type": "ineligible",
+                    }
+                elif any(self.video_required(q) for q in result["reviews"]):
+                    # A required recording of the applicant: the app can't record or upload video and no answer can stand in
+                    # for it, so the job says so instead of waiting in Needs You for good. A required file stays with the
+                    # person, who may have one to add.
+                    state = "closed"
+                    result = {
+                        "state": "closed",
+                        "reason": VIDEO_CLOSING,
                         "blocker_type": "ineligible",
                     }
                 elif any(

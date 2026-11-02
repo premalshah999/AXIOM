@@ -85,8 +85,10 @@ def router(service) -> APIRouter:
             try:
                 # A link the owner imports is their own pick, as in the Add a job box: not ranked against the autopilot's
                 # fit filters first (14 days: 39 manual jobs skipped and 33 left Ready with no run).
+                from ...company_sites import allow
                 from ...owner_apply import apply
 
+                await asyncio.to_thread(allow, db, [row["id"]])  # A pasted link is the owner's own choice (company_sites.py).
                 outcome = await apply(service, row["id"])
                 result["queued"] = outcome
                 if outcome.get("run_id"):
@@ -236,8 +238,10 @@ def router(service) -> APIRouter:
         """One click: approve (no reason needed) and start; a deferred start is remembered, not an error."""
         if not service.dispatch:
             raise ValueError("Workers are disabled")
+        from ...company_sites import allow
         from ...owner_apply import apply
 
+        await asyncio.to_thread(allow, db, [job_id])  # Apply on one job's own page is the owner's choice, whatever its platform.
         return await apply(service, job_id)
 
     @r.post("/api/jobs/{job_id}/restore")
@@ -253,6 +257,10 @@ def router(service) -> APIRouter:
     async def queue(job_id: str, data: QueueInput):
         if not service.dispatch:
             raise ValueError("Workers are disabled")
+        if data.mode == "submit":
+            from ...company_sites import allow
+
+            await asyncio.to_thread(allow, db, [job_id])  # The owner's own click on this job (company_sites.py).
         try:
             result = await service.queue(
                 job_id,
@@ -295,6 +303,41 @@ def router(service) -> APIRouter:
             from ...owner_apply import start
 
             return JSONResponse(status_code=202, content=await start(service, job_id))
+
+    # Take over: the owner finishes an application by hand in the app's Chrome (jobpilot/steer.py). Optional; unused, nothing changes.
+    @r.get("/api/steer")
+    def steered():
+        from ...steer import steered_jobs
+
+        return {"jobs": [{"job_id": k, **v} for k, v in steered_jobs(service.db).items()]}
+
+    @r.get("/api/jobs/{job_id}/steer")
+    def steer_status(job_id: str):
+        from ...steer import status
+
+        return status(service, job_id)
+
+    @r.post("/api/jobs/{job_id}/take-over")
+    async def take_over(job_id: str):
+        from ...steer import start
+
+        try:
+            return await start(service, job_id)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from None
+
+    @r.post("/api/jobs/{job_id}/steer/{how}")
+    async def steer_finish(job_id: str, how: str):
+        from ...steer import finish, submitted
+
+        try:
+            if how == "submitted":
+                return submitted(service, job_id)
+            if how not in {"done", "back"}:
+                raise HTTPException(404)
+            return await finish(service, job_id, how)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from None
 
     @r.delete("/api/jobs/{job_id}")
     async def remove_job(job_id: str):

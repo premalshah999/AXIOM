@@ -9,6 +9,7 @@ exact while nothing changes; past them the replay assumes applications end in th
 cannot be known. The page says so in those words.
 """
 
+import logging
 import threading
 import time
 from collections import deque
@@ -20,9 +21,11 @@ TTL = 5  # seconds a plan is reused: every open Queue polls, and the replay walk
 RETRY_TTL = 20  # seconds the "trying again" list is reused
 
 
-def decides(priority):
+def decides(priority, automatic=True):
     """What decides the order, in plain words."""
     first = "the best fit, then new-grad roles, then the newest" if priority == "best_fit_first" else "new-grad roles, then the best fit, then the newest"
+    if not automatic:
+        first = "the rest in the order you added them"
     return (
         f"What decides the order: jobs you move to the front go first, then {first}. "
         "Only one application runs at each employer, so a second job there waits for the first, and company sites run one at a time. "
@@ -79,6 +82,14 @@ def _item(detail, kind):
     }
 
 
+def dispatching(db):
+    """Whether the dispatcher starts Ready jobs by itself (autopilot.tick): automatic applying on, and its batch not over."""
+    from .jobboard import settings
+
+    cfg = settings(db)
+    return bool(cfg.enabled and cfg.auto_apply and (db.get_setting("job_board_autopilot") or {"state": "active"}).get("state") == "active")
+
+
 def plan(service, value=None):
     """Up next, in order, with why each one waits. Reads on the calling (worker) thread."""
     from .admission import capacity
@@ -132,11 +143,18 @@ def plan(service, value=None):
         return job_id in attempted and not request.get("front")
 
     now_asked = [request_item(j, v) for j, v in ordered if not retry(j, v) and (v.get("not_before") or "") <= moment]
-    fresh = [_item(value["details"][jid], "auto") for jid in value.get("ids", []) if jid not in asked and jid in value.get("details", {})]
+    # The line is what the dispatcher will start. With automatic applying off, or its target reached, it starts only what was asked
+    # for: 70 jobs read "In queue" here with no way to queue them and no worker coming for them (2026-11-01).
+    automatic = dispatching(db)
+    fresh = [_item(value["details"][jid], "auto") for jid in value.get("ids", []) if jid not in asked and jid in value.get("details", {})] if automatic else []
     retries = [request_item(j, v) for j, v in ordered if retry(j, v) and (v.get("not_before") or "") <= moment]
     later = [request_item(j, v) for j, v in ordered if (v.get("not_before") or "") > moment]
     preparing = [item for item in fresh if item.get("tailoring")]
-    fresh = [item for item in fresh if not item.get("tailoring")]
+    # Held by the platform's own pace (one at a time, a pause between starts): a free worker does not take these now, so they are
+    # neither "the next free worker" nor counted in the exact picks. They say why and when instead (2026-11-02: workers sat idle
+    # behind a line of Ashby jobs and the page promised each one the next free worker).
+    paced = [item for item in fresh if item.get("paced") and not item.get("tailoring")]
+    fresh = [item for item in fresh if not item.get("tailoring") and not item.get("paced")]
     picks, stuck = replay([*now_asked, *fresh, *retries], rooms, occupied, [(employer, "normal") for employer in sorted(occupied)])
     free = sum(max(0, n) for n in rooms.values())
     custom_off = not topology.custom
@@ -145,6 +163,8 @@ def plan(service, value=None):
         out.append({**item, "wait": _wait(item, delayed)})
     for item in stuck:
         out.append({**item, "wait": "Company-site applications are off in Settings, so this one waits." if custom_off and item["lane"] == "custom" else "Waiting for a worker."})
+    for item in sorted(paced, key=lambda i: i["paced"].get("until") or ""):
+        out.append({**item, "wait": item["paced"]["reason"]})
     for item in preparing:
         out.append({**item, "wait": "Preparing a tailored resume first. It joins the line when that is ready."})
     for item in later:
@@ -158,7 +178,7 @@ def plan(service, value=None):
         # How many of the first rows are exact while nothing changes: what a free worker takes on the next pass.
         "exact": min(free, len(picks)),
         "free": free,
-        "decides": decides(profile.job_priority),
+        "decides": decides(profile.job_priority, automatic),
         "reading": value,
     }
 
@@ -189,6 +209,7 @@ class Plans:
         try:
             self.value, self.at = plan(service), time.monotonic()
         except Exception:
+            logging.getLogger(__name__).exception("The Queue could not be planned")
             self.at = time.monotonic() - TTL / 2  # try again shortly; keep serving the last plan
         finally:
             self.busy.release()
@@ -258,6 +279,7 @@ def active_rows(service):
             {
                 "job_id": row.id, "run_id": row.run_id, "title": row.title, "company": row.company, "url": row.url, "ats": row.ats, "location": row.location,
                 "state": row.state, "since": row.started_at or row.created_at, "phase": phases.get(row.run_id, ""),
+                "gate": getattr(service, "claim_gates", {}).get(row.run_id, "") if row.state == "queued" else "",
             }
             for row in rows
         ],

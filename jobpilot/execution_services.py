@@ -288,6 +288,10 @@ async def prepare_due(service):
 
     policy = policy_for(service.db).model_copy(update={"owners": service.config.workers})
     due = await asyncio.to_thread(discover_due, service.db, policy)
+    from .features.resumes.choice import abandoned, start
+
+    for job_id in await asyncio.to_thread(abandoned, service.db):
+        start(service.db, service.config, job_id)
     if master_policy(service.db):
         return due  # Retrieval/discovery stay enabled; no automatic PDF preparation.
     from .db import Job, Run, Setting
@@ -390,6 +394,17 @@ def pin_resume(session, config, job, source, profile, artifact_id=None, continua
         or row.description_sha != digest(job.description or "")[:20]
     ):
         raise QueueBlocked("Resume variant is stale; prepare it again", code="stale_resume_variant")
+    if not pinned:
+        # Every path to a sent PDF comes through here. The owner's rules, unconfirmed drafts and approval are decided on the file itself.
+        from .admission import temporary_time
+        from .features.resumes.choice import send_problem
+        from .features.resumes.pipeline import CURRENT_POLICIES
+
+        if row.policy_version not in CURRENT_POLICIES:
+            raise QueueBlocked("Resume variant is stale; prepare it again", code="stale_resume_variant")
+        problem = send_problem(session, row)
+        if problem:
+            raise QueueBlocked(problem[1], outcome="deferred", code=problem[0], not_before=temporary_time())
     root = config.data_dir.resolve()
     path = (root / row.pdf_path).resolve()
     if not path.is_relative_to(root / "tailored") or not path.is_file():

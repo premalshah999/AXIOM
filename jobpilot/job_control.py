@@ -12,9 +12,11 @@ def state(db, job_id):
     return db.get_setting("job_control:" + job_id, {})
 
 
-def require_running(session, job_id):
+def require_running(session, job_id, mode=None):
     control = session.get(Setting, "job_control:" + job_id)
     if control and control.value.get("state") in {"paused", "deleted"}:
+        if mode == "dry_run" and control.value.get("steering") == "opening":
+            return  # Take over: the one dry run that rebuilds the draft for the owner (steer.start). It never submits.
         raise QueueBlocked("This job is " + control.value["state"], outcome="protected", code="job_control")
 
 
@@ -164,7 +166,8 @@ async def watch(service, engine, execution, run_id):
     while not execution.done():
         run_state, control, everything = await asyncio.to_thread(_run_and_control, service.db, run_id)
         interrupt = run_state == "running" and not getattr(engine, "armed", False)
-        if interrupt and control.get("state") in {"paused", "deleted"}:
+        # Take over: the job is paused so nothing else starts, and the one run that rebuilds its draft for the owner is let finish.
+        if interrupt and control.get("state") in {"paused", "deleted"} and control.get("steering") != "opening":
             engine.result = {
                 "state": "paused" if control["state"] == "paused" else "cancelled",
                 "reason": "Owner " + control["state"] + " this application",

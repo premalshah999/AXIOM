@@ -455,3 +455,60 @@
 .ax-delete-wait {
   padding: var(--space-5) 0;
 }
+
+/* Settings, Applying: the two ways jobs get queued, each saying what it does. */
+.st-modes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+.st-mode {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.st-mode:hover {
+  background: var(--inset);
+}
+.st-mode.is-on {
+  border-color: var(--ink-2);
+  background: var(--inset);
+}
+.st-mode i {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-top: 3px;
+  border: 1px solid var(--ink-3);
+  border-radius: 50%;
+}
+.st-mode.is-on i {
+  border: 4px solid var(--ink);
+}
+.st-mode span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.st-mode strong {
+  font-weight: 500;
+}
+.st-mode small {
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+  line-height: 1.45;
+}
+@media (max-width: 599px) {
+  .st-modes {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

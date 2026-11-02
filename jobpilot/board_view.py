@@ -228,7 +228,11 @@ def collect(service):
         if is_shortlink(first["url"]) and not is_shortlink(second["url"]):
             first = {**first, "url": second["url"]}
         out[key] = first
-    rows = list(out.values())
+    # A company's own site is on its own list (company_sites.py): never among the rows a batch, Select all or the autopilot's board reads.
+    from .company_sites import is_company_site
+
+    rows = [row for row in out.values() if not is_company_site(row["ats"])]
+    sites = [row for row in out.values() if is_company_site(row["ats"])]
     at = datetime.now(UTC)
     window = at - timedelta(hours=cfg.max_age_hours)
     with db.session() as s:
@@ -257,6 +261,7 @@ def collect(service):
     requested = db.get_setting("job_board_requested", {}).get("at")
     return {
         "rows": rows,
+        "sites": sites,
         "hidden": hidden,
         "searched_at": max(filter(None, (started, requested)), default=None),
         "scanning": scanning or 0,
@@ -311,8 +316,10 @@ PER_COMPANY = 3  # rows one company shows before "N more at X": one employer pos
 LEVEL_NAMES = ("Intern", "New grad", "Entry", "Mid", "Senior", "Unknown")
 
 
-def page(service, q="", role="all", company="all", place="all", posted="all", platform="all", fit="match", sort="fit", number=1, size=25, level="all", group=True):
+def page(service, q="", role="all", company="all", place="all", posted="all", platform="all", fit="match", sort="fit", number=1, size=25, level="all", group=True, want="page", section="main"):
     """One page of the board, and each filter's choices with how many rows choosing it would show (every other filter kept).
+    `section`: "sites" reads the company-site jobs (company_sites.py), which are never among the main rows.
+    `want`: "rows" leaves the filters' counts out (a panel that shows a few rows); "ids" answers only what Select all selects.
 
     Grouped (the default, while no company is chosen) a company shows its best PER_COMPANY rows in the order asked for, the last
     carrying `more`: how many it hides. Every count here, the total and each filter's, is of the rows shown, so a filter's number is
@@ -320,10 +327,10 @@ def page(service, q="", role="all", company="all", place="all", posted="all", pl
     data = board(service).ready(service)
     if data is None:
         return {
-            "planning": True, "rows": [], "total": 0, "page": 1, "pages": 1, "size": size, "all": 0, "hidden": {}, "searched_at": None, "scanning": 0, "scan_read": 0, "scan_total": 0,
-            "enabled": True, "window": 720, "facets": dict.fromkeys(("fit", "role", "company", "place", "platform", "posted", "level"), []),
+            "planning": True, "rows": [], "total": 0, "page": 1, "pages": 1, "size": size, "all": 0, "sites": 0, "section": section, "hidden": {}, "searched_at": None, "scanning": 0, "scan_read": 0, "scan_total": 0,
+            "enabled": True, "window": 720, "selectable": 0, "ids": [], "facets": dict.fromkeys(("fit", "role", "company", "place", "platform", "posted", "level"), []),
         }
-    rows = data["rows"]
+    rows = data["sites"] if section == "sites" else data["rows"]
     text = " ".join((q or "").casefold().split())
     now_at = datetime.now(UTC)
     since = (now_at - timedelta(hours=POSTED[posted][1])).isoformat() if posted in POSTED else ""
@@ -386,19 +393,31 @@ def page(service, q="", role="all", company="all", place="all", posted="all", pl
                 tail[row["company"]] = row["id"]
         more = {tail[name]: n - PER_COMPANY for name, n in count.items() if n > PER_COMPANY}
         shown = kept
+    # Select all takes what a person can queue, or move up the line: not what waits on an approval, or what the posting rules out.
+    actionable = lambda row: row["can_add"] or row["state"] == "queue"
+    if want == "ids":
+        return {"ids": [row["id"] for row in shown if actionable(row)]}
     size = max(1, min(100, int(size)))
     pages = max(1, -(-len(shown) // size))
     number = max(1, min(int(number), pages))
     by_count = lambda counts: sorted(counts.items(), key=lambda kv: (-kv[1], kv[0].casefold()))
     keep = ("id", "title", "company", "location", "url", "ats", "posted_at", "dated", "source", "score", "state", "line", "position", "can_add", "level", "approval", "reserved")
-    levels = facet("level", lambda r: [r["level"]])
-    return {
+    answer = {
         "rows": [{**{k: row[k] for k in keep}, "more": more.get(row["id"], 0)} for row in shown[(number - 1) * size : number * size]],
         "total": len(shown),
         "page": number,
         "pages": pages,
         "size": size,
+    }
+    if want == "rows":
+        return answer
+    levels = facet("level", lambda r: [r["level"]])
+    return {
+        **answer,
+        "selectable": sum(1 for row in shown if actionable(row)),
         "all": len(rows),
+        "sites": len(data["sites"]),
+        "section": section,
         "grouped": grouped,
         "per_company": PER_COMPANY,
         "hidden": data["hidden"],
