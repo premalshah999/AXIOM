@@ -240,6 +240,55 @@ def test_a_posting_guard_stop_never_escalates(service):
         assert s.get(Setting, "draft_recovery:j-stop") is None
 
 
+async def test_two_failures_on_a_custom_site_queue_an_escalated_run_through_the_real_queue(service):
+    """schedule_recovery, then retry_due and Service.queue, with nothing between them replaced: the run that comes out stays in
+    its lane, carries the strategy and the failed ones, and is sized and briefed as an escalated run."""
+    import hashlib
+
+    from jobpilot.db import Resume
+    from jobpilot.recovery import retry_due
+    from jobpilot.specialist import pool_boost
+
+    config = service.config
+    config.mimo_api_key = "no-model"  # The queue wants a model configured; nothing here calls one.
+    (config.data_dir / "resumes").mkdir(exist_ok=True)
+    (config.data_dir / "resumes" / "alex.pdf").write_bytes(b"%PDF-1.4 test")
+    with service.db.exclusive() as s:
+        resume = Resume(name="Alex", filename="alex.pdf", sha256=hashlib.sha256(b"%PDF-1.4 test").hexdigest(), text="Alex Example.")
+        s.add(resume)
+        s.flush()
+        resume_id = resume.id
+    service.db.set_setting("profile", {"name": "Alex Example", "email": "alex@example.test", "autonomous": True,
+                                       "facts": {"first_name": "Alex", "last_name": "Example"}})
+    service.db.set_setting("control", {"paused": False, "auto_submit": True})
+
+    async def dispatch(_run_id):
+        pass
+
+    service.dispatch = dispatch
+    failed_run(service, "esc", "r1")
+    failed_run(service, "esc", "r2", source="r1")
+    with service.db.exclusive() as s:
+        for rid in ("r1", "r2"):
+            s.get(Run, rid).resume_id = resume_id
+        s.get(Run, "r1").created_at, s.get(Run, "r2").created_at = "2026-11-01T01:00:00+00:00", "2026-11-01T02:00:00+00:00"
+    schedule(service, "r1")
+    saved, escalation = schedule(service, "r2")
+    assert saved["scheduled"] is True and saved["strategy"] == STRATEGY_ESCALATED and "worker_pool" not in saved
+    queued = await retry_due(service)
+    assert queued, service.db.get_setting("draft_recovery:esc").get("queue_outcome")
+    with service.db.session() as s:
+        run = s.get(Run, queued[0]["id"] if isinstance(queued[0], dict) else queued[0])
+        packet = dict(run.packet)
+    assert packet["worker_pool"] == CUSTOM and packet["strategy"] == STRATEGY_ESCALATED
+    assert packet["source_run_id"] == "r2"
+    assert packet["specialist_escalation"]["safe_failed_strategies"] == escalation["safe_failed_strategies"]
+    assert budget_class(packet) == CUSTOM_ESCALATED and pool_boost(config, budget_class(packet)) == 1.0
+    assert "never open, browse to or apply to another posting" in worker_context("custom", budget_class(packet))
+    with service.db.session() as s:
+        assert specialist_attempts(s, "esc") == 1 and automatic_attempts(s, "esc") == 0  # its own allowance, not a standard retry
+
+
 def test_the_queued_event_names_the_custom_escalation():
     note = routing_note(
         CUSTOM,
