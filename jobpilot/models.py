@@ -804,6 +804,13 @@ async def _structured(
                 # nothing wrong) nor an outage on its first sighting. Counted toward the provider's health.
                 provider_health.note_invalid_response(db, config)
                 raise AnswerModelInvalidResponse() from exc
+            from pydantic_ai.exceptions import UnexpectedModelBehavior
+
+            if issues and not run_id and isinstance(exc, UnexpectedModelBehavior):
+                # No run to hold a model_output event (tailoring): the failure itself names the schema and its fields, never
+                # their values, or "output validation" is all anyone can read of it.
+                fields = ", ".join(dict.fromkeys(".".join(map(str, i["field"])) or "reply" for i in issues))
+                raise UnexpectedModelBehavior(f"{exc.message} ({output_type.__name__}: {fields})") from exc
             raise
         provider_health.note_readable_response(config)
         return result.output

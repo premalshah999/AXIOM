@@ -2,11 +2,16 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 Archetype = Literal[
     "shipped product", "open-source tool", "messy data analysis", "benchmark", "internal tool"
 ]
+
+
+def _clip(text, most):
+    text = text.strip()
+    return text if len(text) <= most else (text[:most].rsplit(" ", 1)[0] or text[:most])
 
 
 class Brief(BaseModel):
@@ -15,6 +20,22 @@ class Brief(BaseModel):
     real_stack: list[str] = Field(default_factory=list, max_length=20)
     seniority: str = Field(max_length=400)
     hard_keywords: list[str] = Field(default_factory=list, max_length=10)
+
+    @model_validator(mode="before")
+    @classmethod
+    def fit(cls, data):
+        """A brief only plans; none of it is printed. One a little over a limit is cut, not refused: refused, it was asked again,
+        refused again, and the whole tailoring failed (an ML posting, 2026-11-02). Too few proof points still fail."""
+        if not isinstance(data, dict):
+            return data
+        data = dict(data)
+        for name, most in (("product", 800), ("seniority", 400)):
+            if isinstance(data.get(name), str):
+                data[name] = _clip(data[name], most)
+        for name, most in (("proof_points", 3), ("real_stack", 20), ("hard_keywords", 10)):
+            if isinstance(data.get(name), list):
+                data[name] = data[name][:most]
+        return data
 
 
 class Proposal(BaseModel):
