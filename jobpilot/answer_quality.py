@@ -29,7 +29,12 @@ NARRATIVE = re.compile(
     r"why\b|cover.?letter|motivat|describe|description|tell us|achievement|accomplish|experience with|responsibilit|duties",
     re.I,
 )
-SECRET = re.compile(r"\bpasswords?\b|one.?time|verification code|authentication code|security code", re.I)
+# A credential box names itself briefly. A long Yes/No question that merely mentions a "username and password" ("If you are currently a
+# Brown University Health employee, you MUST apply using your ... username and password via the Jobs Hub") is an ordinary question
+# (forms.AUTH has the same bound, 98306be).
+SECRET = re.compile(
+    r"^(?=.{0,120}$).*?(?:\bpasswords?\b|one.?time|verification code|authentication code|security code)", re.I | re.S
+)
 
 
 class QualityCorrection(BaseModel):

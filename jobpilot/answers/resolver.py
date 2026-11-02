@@ -112,7 +112,7 @@ class Resolver(
         # Source channels ("social media") whose follow-up question offered no truthful option on this application: the
         # parent menu is answered again without them (answers/sources.py).
         self.dead_sources = set()
-        # This application's tax-credit survey outcome, set by the form session (forms.note_survey): "" none launched, "launched", "finished".
+        # This application's tax-credit survey outcome, set by the form session (forms.note_survey): "" none launched, "launched", "finished", "declined", "unproven".
         self.survey = ""
 
     @property
@@ -229,10 +229,10 @@ class Resolver(
         # reused from an earlier dated application.
         if TODAY.search(field["label"]) or "notice period" in field["label"].casefold():
             return None
-        from .validate import BARE_HISTORY_DATE
+        from .validate import BARE_HISTORY_DATE, BARE_OTHER
 
-        if BARE_HISTORY_DATE.fullmatch(field["label"]):
-            return None  # A saved "End Date" answered every history row (validate.BARE_HISTORY_DATE).
+        if BARE_HISTORY_DATE.fullmatch(field["label"]) or BARE_OTHER.fullmatch(field["label"]):
+            return None  # A saved "End Date" answered every history row (validate.BARE_HISTORY_DATE), and a saved "Other" every "Other".
         if packet.exact_answer is None:
             return None
         refs = [
@@ -452,9 +452,9 @@ class Resolver(
         fix = self._repair_overrides.get(normalize(re.sub(r"[\s.*:]+$", "", f.get("label", ""))))
         if not fix:
             return None
-        from .validate import BARE_HISTORY_DATE
+        from .validate import BARE_HISTORY_DATE, BARE_OTHER
 
-        if BARE_HISTORY_DATE.fullmatch(f.get("label", "")):
+        if BARE_HISTORY_DATE.fullmatch(f.get("label", "")) or BARE_OTHER.fullmatch(f.get("label", "")):
             return None  # One row's corrected "From Date" is not every row's (Supermicro 2026-10-27).
         if f.get("history_kind") or HISTORY_ROW.match(f.get("group") or ""):
             # A correction is saved by label and names no row. Lennar's (Workday, 2026-10-21) "School or University"

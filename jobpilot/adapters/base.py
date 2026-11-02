@@ -18,7 +18,7 @@ from playwright.async_api import Error as PlaywrightError
 from ..service import Service
 from ..accounts import Accounts, password_rules
 from ..captcha_observation import ARM_JS
-from ..forms import AUTH, COOKIE_NOTICE, FINAL, LAUNCHER, SURVEY_DONE
+from ..forms import AUTH, COOKIE_NOTICE, FINAL, LAUNCHER, SURVEY_DONE, final_by_marking
 from ..privacy import acknowledge_privacy_notice, dismiss_cookies
 from ..employer_limit import APPLICATION_LIMIT, application_cap
 from ..mail_errors import MailPending, code_inline_wait
@@ -168,6 +168,18 @@ ASSESSMENT_RETURN = re.compile(r"\s*(?:return|back|go back) to (?:the |your )?(?
 # Tyson Foods' Workday refused Save and Continue for a minute after the finished survey and went straight to Review 30 s later (2026-10-28).
 ASSESSMENT_DEMAND = re.compile(r"\b(?:must|need to|required to|please) (?:complete|take|finish) (?:the |this |your )?(?:\w+ ){0,3}assessment\b", re.I)
 ASSESSMENT_RECORD_TRIES = 3
+# A tax-credit questionnaire the employer itself calls voluntary (Fifth Third's step: "This survey is voluntary ... If you prefer not to
+# complete, click Take Assessment and, within the link, 'Decline tax credit screening'; this will allow you to navigate back to your
+# application"). The vendor's own way out: jobcredits.com "Decline tax credit screening.", Synergi "Opt-Out" (confirmed by an "Opt Out" button).
+ASSESSMENT_VOLUNTARY = re.compile(
+    r"\b(?:survey|assessment|screening|questionnaire)\s+is\s+(?:completely\s+)?(?:voluntary|optional)\b|"
+    r"\b(?:voluntary|optional)\s+(?:tax[- ]credit\s+)?(?:survey|assessment|screening|questionnaire)\b|"
+    r"\bprefer not to complete\b[^.]{0,120}\b(?:decline|opt[\s-]*out)\b",
+    re.I,
+)
+# Another survey's words on the same page: Oracle's one page holds the voluntary self-identification beside the tax-credit launcher.
+OTHER_SURVEY = re.compile(r"self[- ]identif|equal (?:employment )?opportunity|\beeo\b|\bdisabilit|\bgender\b|\bethnic|\brace\b", re.I)
+ASSESSMENT_OPT_OUT = re.compile(r"\s*(?:decline|opt[\s-]*out)\b[\w\s,'\-]{0,60}\W*", re.I)
 # A test of the applicant themself, which only they can take. GreatAmerica's Workday step opened the Predictive Index: 87 adjectives
 # describing how you act (2026-10-30), and ten runs went round it and its login page. Answering it for them would be inventing them.
 PERSONAL_TEST = re.compile(
@@ -204,7 +216,33 @@ def personal_test(text):
     return False
 
 
+def survey_called_voluntary(text):
+    """The employer says this tax-credit questionnaire is voluntary, in so many words, next to what it says about the tax credit. Declining is
+    only for this: a survey the employer requires ("You must complete the assessment test") is never declined, however often it went wrong."""
+    text = text or ""
+    for found in ASSESSMENT_VOLUNTARY.finditer(text):
+        if re.search(r"\bnot\s+(?:an?\s+)?$", text[max(0, found.start() - 8) : found.start()], re.I):
+            continue
+        near = text[max(0, found.start() - 160) : found.end() + 160]
+        if TAX_CREDIT.search(text[max(0, found.start() - 400) : found.end() + 400]) and not OTHER_SURVEY.search(near):
+            return True
+    return False
+
+
 PERSONAL_TEST_REASON = "The employer requires a personal test (personality, aptitude or skills) that only you can take, so nothing was sent"
+
+
+def assessment_login_result(text):
+    """A questionnaire vendor's own sign-in: no saved login belongs there, and no password is typed. A tax-credit survey behind one is the
+    person's to reach; anything else behind one is a test of the person, closed as such."""
+    if TAX_CREDIT.search(text or ""):
+        return {
+            "state": "waiting_browser",
+            "reason": "The tax-credit questionnaire asks for a sign-in of its own, and nothing was typed there; nothing was sent",
+            "blocker_type": "control_failure",
+            "recovery_cause": "control_observation",
+        }
+    return {"state": "closed", "reason": PERSONAL_TEST_REASON, "blocker_type": "personal_test"}
 ASSESSMENT_EXIT = re.compile(r"\blater\b|\bexit\b|\bcancel\b|\bquit\b|\bclose\b|\bwithout\b|\bdecline\b|\bdisagree\b", re.I)
 
 
@@ -864,6 +902,7 @@ class Adapter:
             b
             for b in self.buttons(obs, NEXT, self.next_ids)
             if not self.final.search(b["label"])
+            and not final_by_marking(b, obs.get("url"))
             and not re.search(r"^back|previous|cancel|save (?:as )?draft", b["label"], re.I)
             and not (pagination and b["label"].strip().lower() == "next page")
         ]
@@ -893,7 +932,7 @@ class Adapter:
         hits = [
             b
             for b in obs["controls"]
-            if self.final.search(b["label"])
+            if (self.final.search(b["label"]) or final_by_marking(b, obs.get("url")))
             and not b.get("stepper")  # Dayforce's progress step "Submit" is not the button (2026-10-16)
             and not re.search(
                 r"code|search|feedback|question|draft|resume only|cancel|request|privacy|cookie",
@@ -1071,6 +1110,8 @@ class Adapter:
             return False
         self.attempts["assessment"] += 1
         self.assessment_from = urlsplit(self.page.url).hostname or ""
+        if survey_called_voluntary(obs.get("text", "")):
+            self.assessment_voluntary = True
         self.emit("assessment", "Opening the employer's tax-credit questionnaire", {"control": take["label"][:40]})
         await self.dismiss_overlays()
         # A launcher by its automation id or label: the run returns to this tab when a survey tab closes itself, and to
@@ -1089,18 +1130,22 @@ class Adapter:
                 "blocker_type": "control_failure",
                 "recovery_cause": "control_observation",
             }
-        before = await self.form.scan()
+        before = await self.assessment_scan()
         if personal_test(before.get("text", "")):
             return {"state": "closed", "reason": PERSONAL_TEST_REASON, "blocker_type": "personal_test"}
+        if any(f.get("type") == "password" for f in before.get("fields") or []):
+            return assessment_login_result(before.get("text", ""))
         # A survey that asks for a Social Security number closes under the owner's rule before anything on it is answered or asked of a model.
         from ..sensitive_ids import sensitive_matches, stop_if_sensitive
 
         if sensitive_matches(before.get("fields") or []) and await stop_if_sensitive(self.e, before):
             return self.e.result
+        if self.assessment_opt_out_wanted() and await self.opt_out_of_assessment(before):
+            return None
         report = await self.fill_page()
         if isinstance(report, dict) and report.get("state"):
             return report
-        obs = await self.form.scan()
+        obs = await self.assessment_scan()
         controls = [c for c in obs["controls"] if not ASSESSMENT_EXIT.search(c["label"])]
         forward = next((c for c in controls if ASSESSMENT_FORWARD.fullmatch(c["label"].strip())), None) or next(
             (c for c in controls if ASSESSMENT_RETURN.fullmatch(c["label"].strip())), None
@@ -1110,8 +1155,9 @@ class Adapter:
             # question when a radio is clicked and never shows Next (Allison Transmission, PepsiCo 2026-10-25).
             self.emit("assessment", "The questionnaire moved to its next question")
             return None
-        if not forward and not obs["fields"] and SURVEY_DONE.search(obs.get("text", "")):
-            # Finished on its own host ("Thank you ... you may close this window"): back to the application.
+        if not forward and not obs["fields"] and (SURVEY_DONE.search(obs.get("text", "")) or getattr(self.form, "survey_declined", False)):
+            # Finished on its own host ("Thank you ... you may close this window"), or declined with nothing left to press: back to the
+            # application.
             if await self.form.return_from_questionnaire():
                 return None
         if not forward and not self.attempts["assessment_settle"]:
@@ -1143,6 +1189,68 @@ class Adapter:
             await self.form.return_to_opener()
             await self.form.settle(timeout=6)
         return None
+
+    async def assessment_scan(self):
+        """The questionnaire's page, read once it can be: a vendor's page that posts and redirects cannot be inspected mid-navigation
+        (jobcredits.com for Fifth Third, 2026-11-02: "No application document could be inspected" ended the guided flow with "No way
+        forward" on a page that was only loading, and the model took over and opened the questionnaire again)."""
+        obs = await self.form.scan()
+        for _ in range(3):
+            if not obs.get("observation_failure"):
+                break
+            await asyncio.sleep(self.ASSESSMENT_SETTLE_SECONDS)
+            await self.form.settle(timeout=6)
+            obs = await self.form.scan()
+        return obs
+
+    def assessment_opt_out_wanted(self):
+        """Declining is the questionnaire's own way out where the employer calls it voluntary, and nowhere else: not for a required survey
+        that finished without being recorded. It answers nothing, so nothing in it can be untrue. The launch may have been the guided
+        flow's or the model's (the form reads the step it was opened from)."""
+        return self.attempts["assessment_opt_out"] < 2 and bool(
+            getattr(self, "assessment_voluntary", False) or getattr(self.form, "survey_voluntary", False)
+        )
+
+    async def opt_out_of_assessment(self, obs):
+        """Press the questionnaire's decline control, and its confirmation ("Opt Out" beside "Take Survey"), then go back to the
+        application. False when the page offers no such control. The run's record says declined, never finished: "Did you complete the
+        WOTC survey?" is answered from it."""
+        control = next((c for c in obs["controls"] if ASSESSMENT_OPT_OUT.fullmatch(c["label"] or "")), None)
+        if not control:
+            return False
+        self.attempts["assessment_opt_out"] += 1
+        self.emit("assessment", "Declining the optional tax-credit questionnaire", {"control": control["label"][:40]})
+        await self.dismiss_overlays()
+        note = getattr(self.form, "note_survey", None)
+        pressed = " ".join(control["label"].split()).casefold()
+        try:
+            await self.form.click(control["id"], auth_control=True, step_control=True)
+            if note:
+                note("declined")
+            self.form.survey_declined = True
+            await self.form.settle(timeout=6)
+            if not self.form.page.is_closed():
+                after = await self.form.scan()
+                confirm = next(
+                    (
+                        c
+                        for c in after["controls"]
+                        if c["id"] != control["id"]
+                        and " ".join((c["label"] or "").split()).casefold() != pressed
+                        and ASSESSMENT_OPT_OUT.fullmatch(c["label"] or "")
+                    ),
+                    None,
+                )
+                if confirm:
+                    await self.form.click(confirm["id"], auth_control=True, step_control=True)
+                    await self.form.settle(timeout=6)
+        except PlaywrightError:
+            if not self.form.page.is_closed():
+                raise
+        if self.form.page.is_closed() or (getattr(self.form, "openers", None) and not self.in_assessment()):
+            await self.form.return_to_opener()
+            await self.form.settle(timeout=6)
+        return True
 
     async def intermediate_submit(self):
         """The guided flow's submit while the questionnaire is open finishes the questionnaire, not the application.
@@ -1340,6 +1448,11 @@ class Adapter:
             if not self.committed and (locked := self.site_lock(obs)):
                 return locked
             step = self.classify_page(obs)
+            from ..browser import received_application_page
+
+            if step != Step.CONFIRMATION and received_application_page(obs.get("url"), (getattr(self, "job", None) or {}).get("url")):
+                # Whoever got here, the employer has this application: its "Continue" only leads to an account to watch the status.
+                return self.e.received_application()
             if step != Step.EMAIL_ENTRY:
                 self.pending_auth_transition_source = None
             if self.committed and step not in {Step.CONFIRMATION, Step.ALREADY_APPLIED}:
@@ -2390,9 +2503,16 @@ class Adapter:
         self.e.commit_url = getattr(self.page, "url", "")
         witness = getattr(self.e, "watch_commit_click", None)
         watch = await witness(final["id"], self.before_commit) if witness else None
+        by_token = getattr(self.e, "commit_by_token", None)
+        sent = await by_token(final) if by_token else None
+        if isinstance(sent, dict):
+            self.committed = False
+            await self.e.commit_not_delivered(final, RuntimeError("The security check was not solved"))
+            return sent  # Unsolved: no token reached the page, so nothing was sent.
         try:
             try:
-                await self.form.click(final["id"], step_control=True)
+                if not sent:
+                    await self.form.click(final["id"], step_control=True)
             except ValueError as exc:
                 # JPMorgan Oracle 2026-10-14: the captcha callback re-rendered the page and the final
                 # control id went stale. That refusal happens before any click, so re-observe the one

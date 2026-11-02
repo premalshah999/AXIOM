@@ -638,6 +638,18 @@ FINAL = re.compile(
     r"|\babsenden\b|bewerbung (?:abschicken|einreichen)|envoyer ma candidature|\bsoumettre\b",
     re.IGNORECASE,
 )
+# Phenom's application wizard: each step's forward button is id="next" and reads "Next Step"; the last one, on an address naming its review
+# step (&stepname=applicationReview), is atm-id="submit-button" and reads "Continue". Its label says nothing, so it was clicked as a step and its
+# reCAPTCHA token delivered as a step's, and the callback of that token is what posts the application (Humana, 2026-11-01: posted unarmed, and the
+# run ended as "the click timed out, nothing sent" with the button disabled by the send). The platform's mark and the address together.
+REVIEW_ADDRESS = re.compile(r"[?&]step(?:name)?=[^&#]*review", re.I)
+
+
+def final_by_marking(control, url):
+    """A forward-worded control that the application's own markup and address say is its submit."""
+    return str(control.get("atm_id") or "").casefold() == "submit-button" and bool(REVIEW_ADDRESS.search(str(url or "")))
+
+
 # SuccessFactors application pages (classic career site, the candidate portal wizard, Career Site
 # Builder's apply route). Their bare "Apply" is the application submit, never the posting's "Apply now".
 SF_APPLICATION_PAGE = re.compile(
@@ -1875,13 +1887,29 @@ class FormSession:
 
     def note_survey(self, state):
         """This application's survey outcome for the answer rules: "launched" when the run opened the tax-credit survey, "finished" once the run
-        came back from it. A resolver without the attribute (a test double) simply has no record."""
-        if state == "launched" and getattr(self.resolver, "survey", "") == "finished":
+        came back from it, "declined" when it used the questionnaire's own way out. A decline stays: opening the survey again or coming back
+        from it finishes nothing, and "Did you complete the WOTC survey?" must not turn Yes. If this run also wrote answers on the survey, neither
+        word can be proved and it is "unproven", the person's to say. A resolver without the attribute (a test double) simply has no record."""
+        current = getattr(self.resolver, "survey", "")
+        if current == "unproven" or (state == "launched" and current == "finished"):
             return
+        if current == "declined" and state in {"launched", "finished"}:
+            if not any(record.get("external") for record in getattr(self, "ledger", {}).values()):
+                return
+            state = "unproven"
         try:
             self.resolver.survey = state
         except AttributeError:
             pass
+
+    async def launching_step_says_voluntary(self):
+        """Whether the step the survey is opened from calls it voluntary: whoever opens it, the guided flow or the model."""
+        from .adapters.base import survey_called_voluntary
+
+        try:
+            return survey_called_voluntary((await self.scan()).get("text", ""))
+        except Exception:
+            return False  # Unread is not voluntary.
 
     def assessment_tab_returned(self):
         """The launched survey's tab now shows the application's own host: its last link was the way back."""
@@ -5595,7 +5623,7 @@ class FormSession:
         final = [
             b
             for b in self.buttons.values()
-            if FINAL.search(b["label"])
+            if (FINAL.search(b["label"]) or final_by_marking(b, self.page.url))
             and not NOT_FINAL_SUBMIT.search(b["label"])
             and len(b["label"].split()) <= 6
             and not b.get("stepper")  # Dayforce's progress step "Submit" is not the button
@@ -6380,7 +6408,7 @@ class FormSession:
             )
         )
         if (
-            FINAL.search(button["label"])
+            (FINAL.search(button["label"]) or final_by_marking(button, self.page.url))
             and not auth_control
             and not account_form
             and not posting_link
@@ -6454,6 +6482,7 @@ class FormSession:
             self.assessment_origin = urlsplit(opener.url).hostname or ""
             self.assessment_return = opener.url
             self.note_survey("launched")
+            self.survey_voluntary = await self.launching_step_says_voluntary()
         # A "Submit" that this guard allowed for a profile/account popup or a tax-credit
         # launcher must also pass the page's own click guard, or the click is silently
         # cancelled (Starbucks "Create your profile": the agent clicked Submit for minutes).

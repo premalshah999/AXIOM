@@ -1587,6 +1587,8 @@
       partner: el.matches('[class*="partner-button"]') && !!composedClosest(el, '.inline-partner'),
       href: el.getAttribute('href') || '', type: historyEditor(el) ? 'history_select' : el.form ? (el.type || '') : '',
       automation_id: el.dataset.automationId || '', aria_label: el.getAttribute('aria-label') || '',
+      // Phenom's own automation mark: its review step's submit is atm-id="submit-button" and reads "Continue" (forms.final_by_marking).
+      atm_id: el.getAttribute('atm-id') || '',
       html_id: el.id || '', section: section(el), group: groupOf(el),
       // A progress-step item ("Candidate Info / Questionnaire / Submit") is not an action button.
       stepper: !!el.closest('.ant-steps,[role=tablist]'),

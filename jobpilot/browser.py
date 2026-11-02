@@ -34,8 +34,8 @@ from .posting_match import (
 from .redaction import redact
 from .email_browser import EmailBrowser, redacted_url
 from .failure_reports import clean
-from .forms import AUTH, ENTRY, FINAL, STALE_CHOICE, FormSession, NetworkMonitor, ResumeAttachmentError
-from .db import Event, Job, Run
+from .forms import AUTH, ENTRY, FINAL, REVIEW_ADDRESS, STALE_CHOICE, FormSession, NetworkMonitor, ResumeAttachmentError, final_by_marking
+from .db import Event, Job, Run, now
 from .mail import origin
 from .sensitive_ids import stop_if_sensitive
 from .workday import same_posting_page
@@ -372,6 +372,24 @@ def unavailable_posting_redirect(source, destination):
     return ""
 
 
+def received_application_page(page_url, job_url):
+    """The employer's own "your application was received" address for THIS posting: a success status and the posting's own id on a
+    thank-you path (Humana's Phenom site, 2026-11-01: /us/en/applythankyou?status=success&jobSeqNo=HUMHUMUSR434028EXTERNALENUS&jobId=R-434028,
+    "One Last Step! ... creating your Candidate Home Account"). Its Workday sign-in that follows only makes an account to watch the status; the
+    application itself was posted before it. True only when the address names this posting, as a whole id in the posting's address."""
+    try:
+        parts = urlsplit(page_url or "")
+        query = {k.lower(): v for k, v in parse_qsl(parts.query)}
+    except ValueError:
+        return False
+    if not re.search(r"/(?:apply-?)?thank-?you/?$", parts.path, re.I) or (query.get("status") or "").lower() != "success":
+        return False
+    return any(
+        len(ident) >= 5 and re.search(rf"(?<![a-z0-9]){re.escape(ident)}(?![a-z0-9])", job_url or "", re.I)
+        for ident in (query.get("jobseqno") or "", query.get("jobid") or "")
+    )
+
+
 def unavailable_posting_response(response):
     """Follow only the initial document's actual HTTP redirect chain, including short links. The reason kind, or ''."""
     if response is None or response.status != 200:
@@ -603,6 +621,9 @@ NOTHING_SENT_SECONDS = 60
 COMMIT_INPUT_GRACE_SECONDS = 1.5
 # Each read of the page for the witness. A page too busy to answer is doubt: the click stays uncertain.
 COMMIT_WATCH_SECONDS = 3
+# How long a commit waits for a token's callback to start the send before pressing the button itself.
+COMMIT_TOKEN_SECONDS = 8
+RECEIVED_REASON = "The employer's own page for this posting shows the application went through, so it was not sent again"
 # Controls whose disabled state means the page has an unfinished requirement.
 STEP_ACTION = re.compile(
     r"^\s*(?:next|continue|save (?:and|&) continue|submit(?: application)?|apply|sign ?in|log ?in|create account|register)\s*$",
@@ -728,6 +749,32 @@ def unoffered_source_result(question, rules=None):
         "blocker_type": "control_failure",
         "reason": "The applicant's saved application source is not offered for this question; "
         "owner review needed: " + str(question)[:160],
+    }
+
+
+def unbacked_answers_result(pending):
+    """No saved fact backs what the model proposed for these required questions, so they are the person's to answer: the rule is to ask when
+    unsure. This ended as "saved for answer repair" with nothing asked and was tried again on the same words: Brigham Young's "I waive any
+    privileges ... I release from any liability" (I agree / I don't agree), three runs on 2026-11-01. A row that cannot be asked as it stands (no
+    wording read) stays with recovery; completion hands a row the person cannot answer back to it too (Service.review_kind)."""
+    asked = [
+        {**q, "blocker_type": "missing_fact", "retryable": False, "reason": "The answer is not in the saved profile"}
+        for q in pending
+        if str(q.get("question") or "").strip() and q.get("key")
+    ]
+    if asked:
+        return {
+            "state": "needs_review",
+            "reason": "Needs the applicant's answer: " + asked[0]["question"][:160],
+            "blocker_type": "missing_fact",
+            "reviews": asked,
+        }
+    # Persist the typed cause and release this owner instead of paying for identical fill/navigation loops.
+    return {
+        "state": "waiting_browser",
+        "blocker_type": "model_output",
+        "recovery_cause": "model_output",
+        "reason": "Answer evidence did not match the question scope; saved for answer repair",
     }
 
 
@@ -988,10 +1035,12 @@ def navigation_supported_answers(form, obs):
         if (
             field.get("type") not in {"prompt", "combobox", "dropdown", "select", "pills"}
             or re.search(
-                r"password|email|verification|security code|authentication code|one.time|\botp\b|token",
+                r"email|verification|security code|authentication code|one.time|\botp\b|token",
                 field["label"],
                 re.I,
             )
+            # A credential box names itself briefly: a long question that mentions a password in passing is a question (Brown, Q10).
+            or (len(field["label"]) <= 120 and re.search(r"password", field["label"], re.I))
             or (field["id"] not in pending and field.get("value") and field.get("valid", True))
         ):
             continue
@@ -1554,6 +1603,11 @@ class BrowserEngine:
                 landing_response = await self.open_application_route(page, embedded, saved_state)
                 entry_url = self.application_entry_url = embedded
                 self.emit("ats_handoff", "The employer's Ashby board is off; opened the form its own site embeds")
+            if received_application_page(page.url, job["url"]):
+                # The tab or saved route is the employer's own receipt page for this posting: an earlier attempt posted the application
+                # (its tab timed out after the post). Signing in to the employer's candidate site would only start a second one.
+                self.result = self.received_application()
+                return self.result
             if not reopened_route and (kind := unavailable_posting_response(landing_response)):
                 self.result = {"state": "closed", "reason": UNAVAILABLE_POSTING[kind]}
                 return self.result
@@ -2010,6 +2064,7 @@ class BrowserEngine:
                 self.result = confirmed
             return self.result
         finally:
+            self.settle_on_receipt_page()
             if getattr(self, "result", None) and hasattr(self, "form"):
                 self.result["browser_checkpoint"] = self.form.checkpoint_state(
                     self.run_record["packet"]["resume_sha"]
@@ -3732,6 +3787,9 @@ class BrowserEngine:
             return wall
         if not hasattr(self, "captcha"):
             return None
+        if getattr(self, "commit_token_sent", False) or (not self.armed and await self.token_would_send()):
+            # Sent by a token's callback, or about to be (commit_by_token): never a token outside the commit, never a second one.
+            return None
         adapter = adapter or getattr(self, "fallback_mail_adapter", None)
         before_url = self.page.url
         before = await self.form.scan() if adapter and adapter.inbox.live(adapter.challenge) else None
@@ -4552,8 +4610,13 @@ class BrowserEngine:
         self.commit_requests, self.commit_tracking, self.commit_inflight, self.refusal_said = [], 0, set(), []
         self.commit_url = getattr(self.page, "url", "")
         watch = await self.watch_commit_click(final[0]["id"], before, before_rejection)
+        sent = await self.commit_by_token(final[0])
+        if isinstance(sent, dict):
+            await self.commit_not_delivered(final[0], RuntimeError("The security check was not solved"))
+            return sent  # Unsolved: no token reached the page, so nothing was sent.
         try:
-            await control.click(timeout=10000)
+            if not sent:
+                await control.click(timeout=10000)
         except PlaywrightError as exc:
             if not await self.commit_click_undelivered(watch):
                 raise
@@ -4641,6 +4704,82 @@ class BrowserEngine:
         except Exception:
             return False
         return not (receipt and receipt != watch["proof"]) and not (rejection and rejection != watch["rejection"])
+
+    def received_application(self):
+        """The run's result on the employer's own receipt address for this posting (received_application_page). Recorded so that no path sends
+        it again: unknown_resubmit_allowed, which every queue goes through, refuses a job triaged as submitted, and the page's "One Last
+        Step!" has none of the words the resubmit's own check reads, so the installation's resubmit policy would have sent it again."""
+        self.db.set_setting(
+            "unknown_triage:" + self.job["id"],
+            {"verdict": "submitted", "run_id": self.run_id, "at": now(), "source": "the employer's own thank-you page for this posting"},
+        )
+        self.emit("received_page", "The employer's own thank-you page for this posting is open; nothing was sent again")
+        return {"state": "submission_unknown", "reason": RECEIVED_REASON}
+
+    def settle_on_receipt_page(self):
+        """However the run ended (a click that timed out because the send had disabled its button, Humana 2026-11-01), a tab on the receipt
+        address means the employer has the application: the result says so, in place, because the caller holds this same dict."""
+        result = getattr(self, "result", None)
+        if not result or result.get("reason") == RECEIVED_REASON or result.get("state") in {
+            "confirmed", "already_applied", "closed", "stopped", "cancelled", "dry_run_passed",
+        }:
+            return
+        try:
+            page = getattr(getattr(self, "form", None), "page", None) or getattr(self, "page", None)
+            if page is None or not received_application_page(page.url, self.job["url"]):
+                return
+            settled = self.received_application()
+        except Exception:  # A page or database that is gone: the run's own result stands.
+            return
+        for key in ("recovery_cause", "blocker_type", "recoverable", "waiting_kind", "wait_handle"):
+            result.pop(key, None)
+        result.update(settled)
+
+    async def token_would_send(self):
+        """This page's own markup says its forward control is the application's submit (forms.final_by_marking), and its reCAPTCHA token's
+        callback is what presses it: delivering that token is the commit, so it waits for the commit."""
+        form = getattr(self, "form", None)
+        url = str(getattr(getattr(form, "page", None), "url", "") or "")
+        if form is None or not REVIEW_ADDRESS.search(url):
+            return False
+        try:
+            controls = (await form.scan()).get("controls", [])
+        except (PlaywrightError, ValueError):
+            return False
+        return any(final_by_marking(control, url) for control in controls)
+
+    async def commit_by_token(self, control):
+        """The commit on such a page, armed. A dict: no token reached the page and the check stayed unsolved, so nothing was sent. True: a token
+        reached the page, so its callback may have posted the application: the commit stays armed, nothing clicks after it (the button is
+        disabled by then; a second token is a second post: Humana's review step saw three) and the run is never retried. None: not such a page,
+        no token was asked for, or the token moved nothing: the ordinary click."""
+        if getattr(self, "commit_token_sent", False):
+            return True
+        if not final_by_marking(control, getattr(getattr(self.form, "page", None), "url", "")):
+            return None
+        delivered = getattr(self.captcha, "token_delivered_at", {})
+        before = max(delivered.values(), default=0)
+        challenge = await self.browser_challenge()
+        # What reached the page decides, first: the solver can deliver the token and still report a check, if its frame stays drawn.
+        if max(delivered.values(), default=0) <= before:
+            return challenge  # Nothing delivered: an unsolved check, or a step that asks for no token and takes its button.
+        self.commit_token_sent = True
+        if challenge:
+            return True
+        url = self.form.page.url
+        locator = self.form.locator(control["id"])
+        deadline = time.monotonic() + COMMIT_TOKEN_SECONDS
+        while time.monotonic() < deadline:
+            if getattr(self, "commit_inflight", None) or getattr(self, "commit_requests", None) or self.form.page.url != url:
+                return True
+            try:
+                if await locator.is_disabled(timeout=500):
+                    return True
+            except PlaywrightError:
+                return True  # The control went with the page it was on.
+            await asyncio.sleep(0.2)
+        self.commit_token_sent = False  # Nothing moved in all that time: the page waits for its button.
+        return None
 
     async def commit_not_delivered(self, control, exc):
         """End a commit whose click never reached the page: disarmed, its reservation back, repairable like any other
@@ -4896,6 +5035,8 @@ class BrowserEngine:
         url = getattr(self, "commit_url", "")
         if not url or getattr(self.page, "url", "") != url or getattr(self, "commit_inflight", None):
             return False
+        if getattr(self, "commit_token_sent", False):
+            return False  # A token reached a page whose callback is the send (commit_by_token): what it did is not known from here.
         # A write the employer refused with a 4xx accepted nothing (Dallas County: its work-history item answered 400
         # and the application was never posted). A 5xx may have been partly processed and stays uncertain, and so does
         # a 401/403: Rippling answered its apply POST 401 "turnstile_verification_failure" and still created the
@@ -5483,9 +5624,24 @@ class BrowserEngine:
             if stop_if_social_login_only(self, obs):
                 return
             adapter = getattr(self, "fallback_mail_adapter", None)
+            if received_application_page(obs.get("url"), self.job["url"]):
+                from .adapters.base import Step
+
+                if not adapter or adapter.classify_page(obs) != Step.CONFIRMATION:
+                    self.result = self.received_application()
+                    return
             if adapter and not self.armed:
                 from .adapters.base import Step
 
+                if (
+                    adapter.in_assessment()
+                    and adapter.assessment_opt_out_wanted()
+                    and await adapter.opt_out_of_assessment(obs)
+                ):
+                    # The employer calls the survey voluntary: declined with its own control, before the model answers any of it
+                    # (Fifth Third, 2026-11-02: the model opened and answered it, and opened it again, on every run).
+                    self.page = self.form.page
+                    continue
                 if adapter.classify_page(obs) == Step.ALREADY_APPLIED:
                     self.result = await adapter.on_already_applied(obs)
                     return
@@ -5862,15 +6018,8 @@ class BrowserEngine:
                         else:
                             self.result = unoffered_source_result(unoffered[0].get("question", ""), source_rules(self))
                     elif terminal_answer_errors:
-                        # Browsing a picker cannot repair a rejected supporting fact.
-                        # Persist the typed cause and release this owner instead of
-                        # paying for identical fill/navigation loops.
-                        self.result = {
-                            "state": "waiting_browser",
-                            "blocker_type": "model_output",
-                            "recovery_cause": "model_output",
-                            "reason": "Answer evidence did not match the question scope; saved for answer repair",
-                        }
+                        # Browsing a picker cannot repair a rejected supporting fact, and neither does a retry.
+                        self.result = unbacked_answers_result(terminal_answer_errors)
                     elif internal_blocker:
                         self.emit(
                             "internal_repair", "Known-answer control failures remain in owned-page recovery"

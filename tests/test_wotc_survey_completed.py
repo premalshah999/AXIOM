@@ -49,3 +49,46 @@ def test_the_form_session_records_the_survey_outcome_on_its_resolver(service):
     session.note_survey("finished")
     session.note_survey("launched")  # a second launch never erases a finished survey
     assert resolver.survey == "finished"
+
+
+def test_a_survey_this_run_declined_is_no_and_coming_back_from_it_finishes_nothing(service):
+    from jobpilot.forms import FormSession
+
+    resolver = Resolver(Profile(), service.db, service.config, job={"ats": "workday", "url": "https://example.test/j"})
+    session = FormSession(None, resolver, None, lambda *a, **k: None)
+    session.note_survey("launched")
+    session.note_survey("declined")
+    session.note_survey("finished")  # return_to_opener runs on the way back from a declined survey as well
+    assert resolver.survey == "declined"
+    answer = resolver.local(field("Did you complete the WOTC survey?"))
+    assert answer.value == "No" and answer.evidence_ids == ["policy:wotc-survey-declined-in-run"]
+
+
+def test_opening_a_declined_survey_again_never_turns_the_answer_to_yes(service):
+    """A relaunch wrote "launched" and its return "finished" over the decline, so the question read Yes for a survey that was declined."""
+    from jobpilot.forms import FormSession
+
+    resolver = Resolver(Profile(), service.db, service.config, job={"ats": "workday", "url": "https://example.test/j"})
+    session = FormSession(None, resolver, None, lambda *a, **k: None)
+    session.note_survey("launched")
+    session.note_survey("declined")
+    session.note_survey("launched")
+    assert resolver.survey == "declined"
+    session.note_survey("finished")
+    assert resolver.survey == "declined"
+    assert resolver.local(field("Did you complete the WOTC survey?")).value == "No"
+
+
+def test_a_declined_survey_the_run_also_answered_is_left_to_the_person(service):
+    from jobpilot.forms import FormSession
+
+    resolver = Resolver(Profile(), service.db, service.config, job={"ats": "workday", "url": "https://example.test/j"})
+    session = FormSession(None, resolver, None, lambda *a, **k: None)
+    session.note_survey("launched")
+    session.note_survey("declined")
+    session.ledger["q"] = {"label": "Did you receive SNAP?", "answer": "No", "external": True}
+    session.note_survey("launched")
+    session.note_survey("finished")
+    assert resolver.survey == "unproven"
+    answer = resolver.local(field("Did you complete the WOTC survey?"))
+    assert answer.disposition == "review" and answer.value in (None, "")

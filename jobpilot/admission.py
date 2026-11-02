@@ -289,6 +289,25 @@ def unknown_resubmit_allowed(session, runs, at=None, *, checked=True):
     )
 
 
+def receipt_page_seen(session, runs, job_url):
+    """An earlier run of this job stood on the employer's own receipt address for this posting (browser.received_application_page), whatever
+    state it ended in. Humana (2026-11-02) sits in "waiting_browser": its run reopened that page, walked on to Workday's sign-in and stopped
+    there, so its saved route no longer shows it and a retry would start from the posting. The record of the visit outlives the route."""
+    from .browser import received_application_page
+
+    ids = [r.id for r in runs]
+    if not ids:
+        return False
+    return any(
+        received_application_page(url, job_url)
+        for url in session.scalars(
+            select(Event.data["url"].as_string()).where(
+                Event.run_id.in_(ids), Event.kind.in_(("browser", "step")), Event.data["url"].as_string().ilike("%thank%you%")
+            )
+        )
+    )
+
+
 # A cancelled run that sent nothing to the employer is not an attempt. Only the app's own cancellations qualify; a
 # verdict on the job (the owner removing it, the SSN / government-ID rule, a closed posting, any reason not listed here)
 # keeps it out of the autopilot for good. 43 Ready jobs sat idle for a week, every worker free (2026-10-31): 23 Workable
