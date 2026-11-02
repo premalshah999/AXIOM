@@ -107,9 +107,11 @@ def register(values):
             _common.add(value)
             continue
         _known.update(forms(value))
-        # A mailbox app password is shown with spaces and typed without.
+        # A mailbox app password is shown with spaces and typed without, and the app keeps it without: both are the secret.
         if " " in value:
             _known.update(forms(value.replace(" ", "")))
+        elif re.fullmatch(r"[a-z]{16}", value):
+            _known.add(" ".join(value[i : i + 4] for i in range(0, 16, 4)))
     if (len(_known), len(_common)) != before:  # Called on every credential read: sort only when something is new.
         _ordered = tuple(sorted(_known, key=len, reverse=True))
         _labelled_common = _behind_a_label(_common)

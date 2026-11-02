@@ -130,6 +130,12 @@ def test_a_password_with_symbols_is_masked_however_the_text_encodes_it():
     assert "Zq9" not in redaction.redact_page('<input value="Zq9!Em&amp;pl<oy&quot;er#7 x">')
 
 
+def test_a_mailbox_password_is_masked_as_gmail_shows_it_and_as_the_app_keeps_it():
+    # The real server's log kept "wxyz abcd qrst mnop" although the sealed password was registered: the app stores it without spaces.
+    redaction.register(["wxyzabcdqrstmnop"])
+    assert "wxyz" not in redact("said wxyz abcd qrst mnop and wxyzabcdqrstmnop")
+
+
 def test_what_describes_an_oauth_token_is_not_registered_and_the_token_is():
     redaction.register_credentials(
         {"access_token": "ya29.synthetic-access-1234567890", "token_type": "Bearer", "token_uri": "https://oauth2.example.test/token", "expires_in": "3600"}
