@@ -367,6 +367,18 @@ def application_platform(ats_id):
     return not (unsettled(ats_id) or ats_id in AGGREGATORS)
 
 
+def platform_host(host):
+    """The host belongs to a platform the registry names, by its host alone (detect also reads an address's path, which any site can
+    copy). A job board's or a career-site front end's host is neither the employer's nor where an account lives."""
+    host = (host or "").lower().rstrip(".")
+    return any(
+        (host == domain or host.endswith("." + domain))
+        for ats in REGISTRY
+        if ats.id not in AGGREGATORS and ats.id not in VENDORS
+        for domain in ats.domains
+    )
+
+
 def marketing_host(url):
     """A platform's own marketing or corporate site (www.workable.com, icims.com), not a tenant of it. A link or script
     from there is a footer, a "Powered by" badge or a tracker: it says nothing about where this application is made.

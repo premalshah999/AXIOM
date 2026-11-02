@@ -103,3 +103,33 @@ def registrable(host):
     if len(parts) >= 3 and parts[-2] in {"co", "com", "org", "net", "ac", "gov"} and len(parts[-1]) == 2:
         return ".".join(parts[-3:])
     return ".".join(parts[-2:])
+
+
+# Other companies' sign-ins that a page can lead to, the job's own employer included: Apple's postings sign in on idmsa.apple.com, and an
+# Apple ID is not a candidate account. The saved and shared passwords are never theirs. Whole domains first, then single hosts of a
+# company whose other hosts are ordinary sites.
+IDENTITY_PROVIDER = re.compile(
+    r"(?:^|\.)(?:linkedin\.com|facebook\.com|github\.com|twitter\.com|x\.com|indeed\.com|live\.com|microsoftonline\.(?:com|us)|"
+    r"okta\.com|oktapreview\.com|okta-emea\.com|auth0\.com|onelogin\.com|pingidentity\.com|pingone\.(?:com|eu)|duosecurity\.com|"
+    r"amazoncognito\.com|b2clogin\.com|ciamlogin\.com)$|"
+    r"^(?:accounts\.google\.com|appleid\.apple\.com|idmsa\.apple\.com|iforgot\.apple\.com|account\.apple\.com|"
+    r"login\.microsoft\.com|account\.microsoft\.com|login\.windows\.net|login\.yahoo\.com)$",
+    re.I,
+)
+# Outside assessment and questionnaire vendors, and the host a platform or a vendor gives its questionnaire (wotc.adp.com,
+# taxcredit.icims.com). A launcher's wording is not what makes one: "Go to assessment" reached a vendor's login and typed.
+ASSESSMENT_HOST = re.compile(
+    r"(?:^|\.)(?:predictiveindex\.com|hirevue\.com|codility\.com|hackerrank\.com|hackerearth\.com|codesignal\.com|shl\.com|shlglobal\.com|"
+    r"pymetrics\.(?:ai|com)|criteriacorp\.com|testgorilla\.com|harver\.com|wonderlic\.com|plum\.io|traitify\.com|ondemandassessment\.com|"
+    r"cut-e\.com|karat\.com|mettl\.com|modernhire\.com|vervoe\.com|sparkhire\.com|taxcreditco\.com)$|"
+    r"^(?:wotc|taxcredit|tax-credit|assess|assessment|assessments)\.",
+    re.I,
+)
+
+
+def outside_sign_in(host):
+    """"identity" or "assessment" for a host no saved password is ever typed into, whoever's posting led there, else ""."""
+    host = (host or "").rstrip(".")
+    if IDENTITY_PROVIDER.search(host):
+        return "identity"
+    return "assessment" if ASSESSMENT_HOST.search(host) else ""
