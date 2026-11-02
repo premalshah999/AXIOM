@@ -86,3 +86,18 @@ def test_no_dont_make_accounts_turns_off_every_permission_it_declines(client, se
         assert on() == {n: False for n in apply_permissions.FLAGS}
         assert not Profile.model_validate(service.db.get_setting("profile")).allow_account_creation
         assert service.db.get_setting("profile")["first_name"] == "Alex"
+
+
+def test_a_limit_out_of_range_is_refused_in_plain_words():
+    from jobpilot.connections import typed
+
+    assert typed("daily_application_limit", 1000) == 1000
+    with pytest.raises(ValueError) as too_many:
+        typed("daily_application_limit", 1001)
+    assert str(too_many.value) == "Applications per day must be 1000 or less"
+    with pytest.raises(ValueError) as too_few:
+        typed("daily_application_limit", 0)
+    assert str(too_few.value) == "Applications per day must be 1 or more"
+    with pytest.raises(ValueError) as not_a_number:
+        typed("daily_application_limit", "many")
+    assert str(not_a_number.value) == "Applications per day isn't a valid value"
