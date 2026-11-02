@@ -11,7 +11,7 @@ A package at features/resumes/<mode>/ registers itself when imported (`AUTOLOAD`
 picker shows it as coming soon.
 
 What the pipeline does with a result, whichever mode made it, before anything can be approved or sent:
-- check_rules() on `doc` against the source and on the compiled PDF. A failure means no resume: nothing is "repaired" here.
+- check_rules() on `doc` against the source and on the compiled PDF. Preview-only project sources allow review; send checks still require confirmation.
 - `drafts` are stored on the artifact. One still unconfirmed anywhere in the PDF's text stops the send, approval on or off.
 """
 
@@ -79,13 +79,37 @@ class ModeContext:
 class ModeResult:
     latex: str
     pdf_path: Path
-    drafts: list[Draft] = field(default_factory=list)  # Unconfirmed; they stay out of `doc` and the PDF.
+    drafts: list[Draft] = field(default_factory=list)  # Unconfirmed: allowed in review, blocked at approval/send.
     doc: ResumeDoc | None = None  # Required: the rules are checked on it, and the review screen edits it.
     style: Style | None = None
     allowed_skills: list[str] = field(default_factory=list)  # Skills an added item may be, beyond the source's own.
     added_projects: list[Entry] = field(default_factory=list)  # Projects the applicant confirmed that joined this resume.
     report: dict = field(default_factory=dict)  # Shown on the review screen.
     model_calls: int = 0
+    preview_projects: list[Entry] = field(default_factory=list)  # Pending project sources, for preview checks only.
+    removed_projects: list[str] = field(default_factory=list)  # Explicit applicant choices, never model omissions.
+
+
+def review_checks(doc, source, *, added_projects=(), preview_projects=(), unconfirmed=(), **kwargs):
+    """One shared rules implementation, with separate preview and send decisions.
+
+    A pending source must be exactly the declared project draft. It cannot grant
+    permission to change an employer, degree, date, or any non-project section.
+    """
+    drafts = [{**(d if isinstance(d, dict) else d.model_dump()), "confirmed": False} for d in unconfirmed]
+    pending = {d["id"]: d for d in drafts}
+    preview_projects = list(preview_projects)
+    problems = []
+    for entry in preview_projects:
+        draft = pending.get(entry.id)
+        if not draft or entry.heading != draft["title"] or [b.text for b in entry.bullets if b.include] != draft["bullets"] or entry.dates or entry.location:
+            problems.append({"code": "invalid_preview_project", "where": entry.id, "message": "A preview project must match its saved, unconfirmed draft."})
+    preview = check_rules(doc, source, added_projects=[*added_projects, *preview_projects], **kwargs)
+    if problems:
+        preview["problems"].extend(problems)
+        preview["ok"] = False
+    send = check_rules(doc, source, added_projects=added_projects, unconfirmed=drafts, **kwargs)
+    return preview, send
 
 
 ModeFn = Callable[[dict, SourceResume, dict, ModeContext], Awaitable[ModeResult]]

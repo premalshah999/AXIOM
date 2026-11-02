@@ -9,6 +9,7 @@ import { useAction, usePoll } from "./hooks";
 import { PdfPages, usePdf } from "./pdfpages";
 import { SwitchRow } from "./setup-kit";
 import { Button, Loading, Panel, Pill } from "./ui/index";
+import { AggressiveDrafts } from "./aggressive";
 import "./styles/tailoring.css";
 
 // ---------- What the server sends ----------
@@ -28,6 +29,8 @@ type View = {
   approval_required: boolean;
   choice: (TailorState & { error: { code?: string; detail?: string }; artifact_id: string | null; approved_artifact_id: string | null; approved_at: string | null; approved_how: string | null }) | null;
   stale: boolean;
+  approval_block: { code: string; message: string } | null;
+  project_changes_pending: boolean;
   artifact: { id: string; pdf_sha: string; model_calls: number; cost: number; finished_at: string; policy_version: string } | null;
   source_doc: Doc | null;
   doc: Doc | null;
@@ -37,7 +40,8 @@ type View = {
   rules: { ok: boolean; problems: Problem[]; warnings: Problem[]; typography?: { ok: boolean; sizes: Record<string, number[]> } | null; pages?: number | null } | null;
   rule_problems: Problem[];
   parse: { ok: boolean; items: { label: string; ok: boolean; detail: string }[] } | null;
-  report: { changed_bullets?: number; added_skills?: string[]; refused?: { id: string; reason: string }[]; overflow?: boolean; summary_origin?: string };
+  report: { workspace_id?: string; changed_bullets?: number; added_skills?: string[]; refused?: { id: string; reason: string }[]; overflow?: boolean; summary_origin?: string };
+  preview_rules: View["rules"];
   drafts: { id: string; title: string; bullets: string[]; confirmed: boolean }[];
   pages: number | null;
   cost: { usd: number; calls: number; prompt_tokens: number; completion_tokens: number } | null;
@@ -656,7 +660,7 @@ function Review({ view, onView, onChanged }: { view: View; onView: (v: View) => 
       <div className="tl-bar">
         <ScoreBar score={live.score} source={view.ats_source} keywords={live.rows} tiers={live.tiers} />
         <div className="tl-actions">
-          <Button variant="primary" disabled={pending !== null || !view.rules?.ok} onClick={approve}>
+          <Button variant="primary" disabled={pending !== null || !view.rules?.ok || !!view.approval_block || view.stale} onClick={approve}>
             {approved && !dirty ? "Approved" : view.approval_required ? "Approve and apply" : "Save and apply"}
           </Button>
           {dirty && (
@@ -679,6 +683,12 @@ function Review({ view, onView, onChanged }: { view: View; onView: (v: View) => 
         </div>
       </div>
       <p className="tl-disclaimer">{view.ats.disclaimer}</p>
+      {view.approval_block && <p className="ax-note" role="status">{view.approval_block.message}</p>}
+      {view.report.workspace_id && <>
+        {dirty && <p className="ax-note">Save your resume edits before changing projects.</p>}
+        <AggressiveDrafts workspaceId={view.report.workspace_id} jobId={view.job.id} needsUpdate={view.project_changes_pending}
+          disabled={dirty || pending !== null || ["queued", "running", "submitting", "waiting_browser", "confirmed", "submission_unknown", "already_applied"].includes(view.job.status)} onChanged={onChanged} />
+      </>}
       {message && (
         <p className={problems.length ? "ax-error tl-message" : "tl-message"} role="status">
           {message}
@@ -729,7 +739,8 @@ function Review({ view, onView, onChanged }: { view: View; onView: (v: View) => 
               <section key={s.id} className="tl-sec">
                 <h3>{s.title}</h3>
                 {s.entries.map((e, ei) => {
-                  const removable = s.kind === "projects" && source.sections.some((x) => x.entries.some((y) => y.id === e.id));
+                  const removable = !view.report.workspace_id && s.kind === "projects" && source.sections.some((x) => x.entries.some((y) => y.id === e.id));
+                  const generated = !!view.report.workspace_id && !source.sections.some((x) => x.entries.some((y) => y.id === e.id));
                   return (
                     <article key={e.id} className={"tl-entry" + (e.include ? "" : " is-off")}>
                       <header>
@@ -747,7 +758,7 @@ function Review({ view, onView, onChanged }: { view: View; onView: (v: View) => 
                         <ul className="tl-bullets">
                           {e.bullets.map((b, bi) =>
                             b.include ? (
-                              <BulletEdit key={b.id} bullet={b} source={sourceBullets.get(b.id)} keywords={onResume} problem={problemAt(b.id)} onChange={(t) => setBullet(si, ei, bi, t)} />
+                              generated ? <li key={b.id} className="tl-fixed"><Marked text={b.text} keywords={onResume} /></li> : <BulletEdit key={b.id} bullet={b} source={sourceBullets.get(b.id)} keywords={onResume} problem={problemAt(b.id)} onChange={(t) => setBullet(si, ei, bi, t)} />
                             ) : null,
                           )}
                         </ul>
@@ -762,10 +773,10 @@ function Review({ view, onView, onChanged }: { view: View; onView: (v: View) => 
         <aside className="tl-col tl-side">
           <KeywordLists rows={live.rows} onAdd={addSkill} />
           <Posting text={view.job.description} rows={live.rows} />
-          {view.drafts.some((d) => !d.confirmed) && (
+          {!view.report.workspace_id && view.drafts.some((d) => !d.confirmed) && (
             <section className="tl-drafts">
               <h2>Not built yet</h2>
-              <p className="ax-note">Ideas only. These aren't on your resume and can't reach it until you confirm you've built them.</p>
+              <p className="ax-note">These drafts need your approval before applications.</p>
               <ul>{view.drafts.filter((d) => !d.confirmed).map((d) => <li key={d.id}>{d.title}</li>)}</ul>
             </section>
           )}
@@ -786,7 +797,7 @@ function Review({ view, onView, onChanged }: { view: View; onView: (v: View) => 
 }
 
 function Checks({ view, sized }: { view: View; sized?: Record<string, number[]> }) {
-  const rules = view.rules;
+  const rules = view.preview_rules || view.rules;
   const type = sized && `Name ${sized.name?.[0] ?? "?"} pt, headings ${sized.section?.[0] ?? "?"}, sub-headings ${sized.sub?.[0] ?? "?"}, bullets ${sized.bullet?.[0] ?? "?"}, read from the PDF`;
   return (
     <section className="tl-checks" aria-label="Checks">

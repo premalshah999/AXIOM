@@ -110,7 +110,7 @@ async def run(db, config, job_id: str, *, model=None, compile_fn=None, fresh=Fal
         _record(db, job_id, state="failed", error={"code": "tailoring_error", "retryable": True, "detail": type(exc).__name__})
         return {"state": "failed"}
     if result.status == "ready" and result.artifact:
-        approved = not approval_required(db)
+        approved = not approval_required(db) and bool((result.artifact.validation.get("rules") or {}).get("ok"))
         _record(
             db,
             job_id,
@@ -198,9 +198,14 @@ def artifact_current(session, row: RsArtifact, job) -> bool:
     return row.profile_digest == profile_digest((profile.value if profile else {}) or {}) and row.description_sha == digest(job.description or "")[:20]
 
 
-def send_problem(session, row: RsArtifact) -> tuple[str, str] | None:
-    """Why this artifact can't go to an employer, or None. The last check before a run is bound to a PDF, whichever path asked, approval on or off."""
+def content_problem(session, row: RsArtifact) -> tuple[str, str] | None:
+    """Content and project revisions must be valid, even with automatic approval."""
     validation = row.validation or {}
+    if validation.get("mode") == "aggressive" or (validation.get("report") or {}).get("workspace_id") or row.policy_version == "tailor-aggressive-v1":
+        from .aggressive.guards import send_problem as project_problem
+
+        if problem := project_problem(session, row):
+            return problem
     tailored = modes.is_tailored_policy(row.policy_version)
     rules = validation.get("rules")
     if (tailored or rules is not None) and not (rules or {}).get("ok"):
@@ -209,6 +214,13 @@ def send_problem(session, row: RsArtifact) -> tuple[str, str] | None:
     leaks = draft_leaks(row.text or "", validation.get("drafts") or [])
     if leaks:
         return UNCONFIRMED, f'"{leaks[0]}" is a draft you haven\'t confirmed, so this resume can\'t be sent'
+    return None
+
+
+def send_problem(session, row: RsArtifact) -> tuple[str, str] | None:
+    """The same content and approval gate at queue admission and when a worker takes the PDF."""
+    if problem := content_problem(session, row):
+        return problem
     if _approval_required_in(session):
         choice = session.get(RsTailorChoice, row.job_id) if row.job_id else None
         if not choice or choice.approved_artifact_id != row.id or choice.approved_sha != row.pdf_sha:
@@ -267,6 +279,8 @@ def approve(db, config, job_id: str, artifact_id: str) -> dict:
             raise ValueError("This tailored version isn't ready")
         if not pipeline.file_intact(config.data_dir, artifact):
             raise ValueError("The PDF changed or went missing. Tailor it again")
+        if problem := content_problem(s, artifact):
+            raise ValueError(problem[1])
         validation = artifact.validation or {}
         rules = validation.get("rules") or {}
         if not rules.get("ok"):

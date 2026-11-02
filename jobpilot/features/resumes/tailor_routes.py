@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from .._store import digest, new_id, now, sha256_bytes
-from . import ats, choice, editor, evidence, modes, pipeline
+from . import ats, choice, editor, evidence, modes
 from .compiler import compile_pdf
 from .layout import fit
 from .rules import check_rules, doc_plain, draft_leaks, live_entries
@@ -122,6 +122,13 @@ def view(db, config, job_id: str) -> dict:
             "policy_version": artifact.policy_version,
         }
         stale = bool(artifact) and not choice.artifact_current(s, artifact, _JobLike(job))
+        blocked = choice.content_problem(s, artifact) if artifact else None
+        project_changes_pending = False
+        if artifact and (v.get("report") or {}).get("workspace_id"):
+            from .aggressive import store
+
+            workspace = s.get(store.Workspace, v["report"]["workspace_id"])
+            project_changes_pending = workspace is None or workspace.revision != v["report"].get("workspace_revision")
         choice_view = row and {
             "mode": row.mode,
             "state": row.state,
@@ -146,6 +153,8 @@ def view(db, config, job_id: str) -> dict:
         "approval_required": choice.approval_required(db),
         "choice": choice_view,
         "stale": stale,
+        "approval_block": {"code": blocked[0], "message": blocked[1]} if blocked else None,
+        "project_changes_pending": project_changes_pending,
         "artifact": artifact_view,
         "source_doc": source_doc.model_dump() if source_doc else None,
         "doc": doc.model_dump() if doc else None,
@@ -153,6 +162,7 @@ def view(db, config, job_id: str) -> dict:
         "ats_source": ats.score(terms, source_text, evidence_text)["score"],
         "ats_pdf": (v.get("ats") or {}).get("pdf_score"),
         "rules": v.get("rules"),
+        "preview_rules": v.get("preview_rules") or v.get("rules"),
         "rule_problems": rule_problems,
         "parse": v.get("parse"),
         "quality": v.get("quality"),
@@ -205,6 +215,7 @@ def editor_rules(db, data, pdf: bytes) -> dict:
         pdf=pdf,
         allowed_skills=validation.get("allowed_skills") or (db.get_setting("profile", {}) or {}).get("skills") or [],
         added_projects=[editor.Entry.model_validate(e) for e in validation.get("added_projects") or []],
+        removed_projects=validation.get("removed_projects") or [],
         unconfirmed=validation.get("drafts") or [],
         edited=[b.id for s in data.doc.sections for e in s.entries for b in e.bullets],
     )
@@ -280,6 +291,11 @@ def add(r, service) -> None:
             base = s.get(RsArtifact, row.artifact_id) if row and row.artifact_id else None
             if base is None or base.status != "ready":
                 raise HTTPException(409, "There's no tailored version to edit yet")
+            if (base.validation.get("report") or {}).get("workspace_id"):
+                from .aggressive.guards import send_problem as project_problem
+                problem = project_problem(s, base)
+                if problem and problem[0] == choice.STALE:
+                    raise HTTPException(409, "Update the project PDF before editing this resume.")
             v = copy.deepcopy(base.validation or {})
             identity = {
                 "source_resume_id": base.source_resume_id,
@@ -297,23 +313,28 @@ def add(r, service) -> None:
         _inv, evidence_text = _evidence_text(profile, resume_text, source)
         known = {e.id for s_ in source.sections if s_.kind == "projects" for e in s_.entries}
         removed = [x for x in data.removed_projects if x in known]
+        if v.get("mode") == "aggressive" and set(removed) != set(v.get("removed_projects") or []):
+            raise HTTPException(409, "Change the originals in Choose your projects, then update the PDF.")
         was = {b.id: b.text for s_ in before.sections for e in s_.entries for b in e.bullets}
         edited = [b.id for s_ in data.doc.sections for e in s_.entries for b in e.bullets if was.get(b.id) != b.text]
         had = {s_.id: s_.text for s_ in before.sections}
         edited += [s_.id for s_ in data.doc.sections if s_.kind in {"text", "skills"} and had.get(s_.id) != s_.text]
         added = [editor.Entry.model_validate(e) for e in v.get("added_projects") or []]
+        previews = [editor.Entry.model_validate(e) for e in v.get("preview_projects") or []]
         # Decide the structure first: there's no point compiling what can't be saved, and the answer names the bullet to fix.
-        first = check_rules(data.doc, source, allowed_skills=v.get("allowed_skills") or [], added_projects=added, removed_projects=removed, unconfirmed=v.get("drafts") or [], vocabulary=evidence_text, edited=edited)
+        first, _ = modes.review_checks(data.doc, source, allowed_skills=v.get("allowed_skills") or [], added_projects=added, preview_projects=previews, removed_projects=removed, unconfirmed=v.get("drafts") or [], vocabulary=evidence_text, edited=edited)
         if not first["ok"]:
             return JSONResponse({"detail": first["problems"][0]["message"], "problems": first["problems"], "warnings": first["warnings"]}, status_code=422)
         laid = await fit(data.doc, style, compile_pdf)
         compiled = laid["compiled"]
         if not compiled.ok:
             return JSONResponse({"detail": compiled.detail, "problems": [{"code": "compile", "where": "pdf", "message": compiled.detail}], "warnings": []}, status_code=422)
-        rules = check_rules(data.doc, source, pdf=compiled.pdf, allowed_skills=v.get("allowed_skills") or [], added_projects=added, removed_projects=removed, unconfirmed=v.get("drafts") or [], vocabulary=evidence_text, edited=edited)
-        if not rules["ok"]:
-            return JSONResponse({"detail": rules["problems"][0]["message"], "problems": rules["problems"], "warnings": rules["warnings"]}, status_code=422)
+        preview_rules, rules = modes.review_checks(data.doc, source, pdf=compiled.pdf, allowed_skills=v.get("allowed_skills") or [], added_projects=added, preview_projects=previews, removed_projects=removed, unconfirmed=v.get("drafts") or [], vocabulary=evidence_text, edited=edited)
+        if not preview_rules["ok"]:
+            return JSONResponse({"detail": preview_rules["problems"][0]["message"], "problems": preview_rules["problems"], "warnings": preview_rules["warnings"]}, status_code=422)
         parsed = parse_check(compiled.pdf, data.doc)
+        if not parsed["ok"]:
+            raise HTTPException(422, "The edited PDF failed its ATS extraction checks.")
         terms = v.get("ats_terms") or []
         from . import gates
 
@@ -325,6 +346,7 @@ def add(r, service) -> None:
         v.update(
             editor={"doc": data.doc.model_dump(), "style": laid["style"].model_dump()},
             rules=rules,
+            preview_rules=preview_rules,
             parse={k: x for k, x in parsed.items() if k != "text"},
             quality=gates.quality(data.doc),
             ats={
@@ -346,8 +368,18 @@ def add(r, service) -> None:
             f.write(compiled.pdf)
         os.chmod(path, 0o600)
         pdf_sha = sha256_bytes(compiled.pdf)
-        approval = choice.approval_required(db)
+        approval = choice.approval_required(db) or not rules["ok"]
         with db.exclusive() as s:
+            current = s.get(RsTailorChoice, job_id)
+            if current is None or current.artifact_id != base.id:
+                raise HTTPException(409, "This resume changed while saving. Reload the review.")
+            if (v.get("report") or {}).get("workspace_id"):
+                from .aggressive import store
+                from .aggressive.integration import real_document
+                workspace = s.get(store.Workspace, v["report"]["workspace_id"])
+                if workspace is None or workspace.revision != v["report"].get("workspace_revision"):
+                    raise HTTPException(409, "Project choices changed while saving. Update the PDF again.")
+                workspace.payload = {**workspace.payload, "report": {**workspace.payload.get("report", {}), "tailored_doc": real_document(store.view(workspace), v).model_dump()}}
             s.add(
                 RsArtifact(
                     id=artifact_id,

@@ -187,7 +187,7 @@ async def _build_mode(db, config, job, resume, profile, source_tuple, spec, mode
     from pypdf import PdfReader
 
     from . import ats
-    from .rules import check_rules, doc_plain
+    from .rules import doc_plain
     from .select import supported_terms
     from .validate import parse_check
 
@@ -211,12 +211,14 @@ async def _build_mode(db, config, job, resume, profile, source_tuple, spec, mode
     if result.doc is None:
         raise _Fail("tailoring_error", False, f"Mode {spec.id} returned no document, so its rules can't be checked")
     drafts = [d.model_dump() for d in result.drafts]
-    rules = check_rules(
+    preview_rules, rules = modes.review_checks(
         result.doc,
         doc,
         pdf=pdf,
         allowed_skills=[*inv.skills, *result.allowed_skills],
         added_projects=result.added_projects,
+        preview_projects=result.preview_projects,
+        removed_projects=result.removed_projects,
         unconfirmed=drafts,
         vocabulary=evidence_text,
     )
@@ -232,19 +234,24 @@ async def _build_mode(db, config, job, resume, profile, source_tuple, spec, mode
         "source_doc": doc.model_dump(),
         "editor": {"doc": result.doc.model_dump(), "style": (result.style or style).model_dump()},
         "rules": rules,
+        "preview_rules": preview_rules,
         "parse": {k: v for k, v in parsed.items() if k != "text"},
         "quality": gates.quality(result.doc),
         "ats": {"score": ats_now["score"], "pdf_score": ats_pdf["score"], "source_score": ats_source["score"], "tiers": ats_now["tiers"]},
         "ats_terms": terms,
         "allowed_skills": sorted({*inv.skills, *result.allowed_skills}),
         "added_projects": [e.model_dump() for e in result.added_projects],
+        "preview_projects": [e.model_dump() for e in result.preview_projects],
+        "removed_projects": result.removed_projects,
         "drafts": drafts,
         "report": result.report,
         "pages": parsed["pages"],
         "latex": result.latex,
     }
-    if not rules["ok"]:
-        raise _Fail("rules", False, "; ".join(p["message"] for p in rules["problems"][:3]), validation)
+    if not preview_rules["ok"]:
+        raise _Fail("rules", False, "; ".join(p["message"] for p in preview_rules["problems"][:3]), validation)
+    if not parsed["ok"]:
+        raise _Fail("ats_parse", False, "; ".join(i["label"] for i in parsed["items"] if not i["ok"]), validation)
     return {
         "pdf": pdf,
         "text": text or "\n".join(p.extract_text() or "" for p in PdfReader(io.BytesIO(pdf)).pages),
@@ -435,6 +442,7 @@ async def prepare_resume(
             "prompt_tokens": sum(m["prompt_tokens"] or 0 for m in meter),
             "completion_tokens": sum(m["completion_tokens"] or 0 for m in meter),
         }
+        validation["generation_cache_key"] = key
         folder = os.path.join(str(config.data_dir), "tailored")
         os.makedirs(folder, mode=0o700, exist_ok=True)
         rel = os.path.join("tailored", row_id + ".pdf")  # service-generated name only
