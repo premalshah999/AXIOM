@@ -3332,6 +3332,11 @@ class FormSession:
                 # nothing on Lyft's Greenhouse form, and the refill cleared a choice already made (2026-10-25). The city
                 # is searched too, and the address picks its own state's result.
                 search_queries = [*search_queries, city]
+            state = getattr(getattr(getattr(self.resolver, "profile", None), "address", None), "state", "") or ""
+            if state and self.location_resolver(field) and normalize(state) != normalize(value):
+                # Other boxes list regions only ("Maryland, United States"; n8n's Ashby "Where are you currently based? Please specify the
+                # state", 2026-11-01): the state is searched by its full name, since "MD" lists Morocco and Malaysia.
+                search_queries = [*search_queries, max(widgets._alias_group(state) | {normalize(state)}, key=len).title()]
             country = getattr(getattr(getattr(self.resolver, "profile", None), "address", None), "country", "") or ""
             if country and self.location_resolver(field) and normalize(country) != normalize(value):
                 # Some location boxes list countries only: "Location, Country you're currently residing in" answered "No results" for the
@@ -3745,7 +3750,7 @@ class FormSession:
     def location_resolver(self, field):
         """For a location search box, pick the result matching the applicant's address."""
         from .answers import CONTACT, address_location_option
-        from .answers.contact import address_country_option
+        from .answers.contact import address_country_option, address_state_option
 
         if not self.resolver or normalize(field.get("label", "")) not in CONTACT["location"] | {
             "city",
@@ -3753,7 +3758,11 @@ class FormSession:
         }:
             return None
         address = self.resolver.profile.address
-        return lambda texts: address_location_option(texts, address) or address_country_option(texts, address)
+        return lambda texts: (
+            address_location_option(texts, address)
+            or address_state_option(texts, address)
+            or address_country_option(texts, address)
+        )
 
     @timed("discover")
     async def discover_options(self, field):

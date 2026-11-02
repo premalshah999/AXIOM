@@ -3311,7 +3311,7 @@ async def combobox(
             dict.fromkeys(
                 (search_queries or []) + sorted(_alias_group(value) - {norm(value)}, key=len, reverse=True)
             )
-        )[:3]
+        )[:4]
         for alias in aliases:
             await el.fill("")
             await el.press_sequentially(alias, delay=12, timeout=4000)

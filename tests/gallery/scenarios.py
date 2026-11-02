@@ -493,6 +493,18 @@ country_location = Scenario(
     profile=_ADDRESS,
 )
 
+state_location = Scenario(
+    "a_location_box_that_lists_states",
+    "\"Where are you currently based? Please specify the state\" listed only regions (\"Maryland, United States\", \"Maryland, Liberia\"): the city found nothing and the run stopped (n8n on Ashby, 2026-11-01).",
+    {**simple_apply, "/apply/1": page("Apply", "<h1>Apply: Software Engineer</h1>" + form(
+        NAME_FIELDS, EMAIL_FIELD, RESUME_FIELD,
+        combo("location", "Where are you currently based?", ["Maryland, Liberia", "Maryland, United States", "Texas, United States", "United States"],
+              'required data-search="1" class="ashby-application-form-input-autocomplete"').replace('class="select__input" ', ""),
+        SUBMIT_BUTTON))},
+    expect={"location": "Maryland, United States"},
+    profile=_ADDRESS,
+)
+
 no_answer_saved = Scenario(
     "a_saved_not_answered_is_not_typed",
     "\"Not Answered\", chosen once from a county's menu labelled \"Other\", was typed into an optional \"Other\" website box and refused as an invalid URL, three runs (MSK's Workday, 2026-11-01).",
@@ -601,6 +613,7 @@ SCENARIOS = [
     long_agreements,
     resume_modal,
     country_location,
+    state_location,
     no_answer_saved,
     long_question_with_password,
     work_upload,
