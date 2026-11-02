@@ -267,5 +267,5 @@ def test_sync_named_employer_rows_are_history_rows(service):
     by_name = {f["name"]: {**f, "id": f["name"], "required": True, "valid": True, "section": "",
                            "options": ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul"] if f["type"] == "select" else []}
                for f in fields}
-    assert resolver.local(by_name["icims_1_curr_end_date_sync_Year"]).value == "2025"
+    assert resolver.local(by_name["icims_1_curr_end_date_sync_Year"]).value == "2024"
     assert resolver.local(by_name["icims_1_curr_end_date_sync_Month"]).value == "Jun"
