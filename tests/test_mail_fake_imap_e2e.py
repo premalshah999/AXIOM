@@ -20,6 +20,7 @@ import fake_imap
 from jobpilot import gmail_imap
 from jobpilot.db import Job, Mailbox, MailChallenge, Run, now
 from jobpilot.mail_errors import MailPending, MailSenderBusy
+from support_budget import stretch_playwright_ceilings
 from support_mail import seed  # noqa: F401  (configured() is used through setup_engine)
 from test_mail_browser import setup_engine
 
@@ -39,6 +40,7 @@ def imap(monkeypatch):
     # How long a run waits in the browser for a code that comes: paid only by one that never does, and the test of that sets its own.
     # The app's 30 s ran out on a starved Mac with the mail already in the box.
     monkeypatch.setattr("jobpilot.email_browser.code_inline_wait", lambda ats: 300)
+    stretch_playwright_ceilings(monkeypatch)  # a click on Verify bounded at 5 s ran out with the page already moving on
     for cache in (gmail_imap._clients, gmail_imap._where, gmail_imap._identity):
         cache.clear()
     yield box

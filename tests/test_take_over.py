@@ -30,7 +30,6 @@ from jobpilot.db import Event, Job, Resume, Review, Run, Setting
 from jobpilot.discovery import add_job
 from jobpilot.answers import Resolver
 from jobpilot.schemas import Answer, JobInput
-from support_budget import scaled
 from support_chrome import chrome_opens_a_tab
 
 pytestmark = [pytest.mark.browser, pytest.mark.integration]
@@ -115,12 +114,12 @@ async def start_chrome(temp):
         await asyncio.sleep(0.1)
     with open(portfile) as f:
         address = f"http://127.0.0.1:{f.read().splitlines()[0]}"
-    await chrome_opens_a_tab(address, scaled(300))
+    await chrome_opens_a_tab(address, 300)
     return process, address
 
 
 async def until(check, seconds, step=0.5):
-    deadline = time.monotonic() + scaled(seconds)
+    deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         found = check()
         if found:
