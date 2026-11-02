@@ -930,13 +930,27 @@ def persist_scan(db, source, posts, seen, complete, cfg, profile, at, report):
     return created, rejected
 
 
+READ_DONE = ("done", "complete")  # A board's scan and the new-grad sweep name a finished read differently.
+
+
+def keep_last_read(previous, flag):
+    """`flag` with the start of the last read that finished (`read_at`), taken from the `previous` flag it replaces.
+
+    What a finished read proved must outlive the flag: each search rewrites every board's flag to "queued", and a read may then fail,
+    and the board brought back every listing that read had missed, for a whole scan round or until the board answered again."""
+    previous = previous or {}
+    # A flag from before `read_at` existed has its own start. An empty `read_at` is a finished sweep that proved nothing (a list failed to load).
+    kept = previous["read_at"] if "read_at" in previous else previous.get("started_at") if previous.get("state") in READ_DONE else None
+    return {**flag, "read_at": kept} if kept is not None else flag
+
+
 async def scrape_source(source, db, config):
     cfg = settings(db)
     if not cfg.enabled:
         return []
     at = datetime.now(UTC)
     key = "job_board_scan:" + source["id"]
-    report = {
+    report = keep_last_read(await asyncio.to_thread(db.get_setting, key, {}), {
         "state": "running",
         "started_at": at.isoformat(),
         "checked": 0,
@@ -945,7 +959,7 @@ async def scrape_source(source, db, config):
         "old": 0,
         "unknown_date": 0,
         "excluded": 0,
-    }
+    })
     await asyncio.to_thread(db.set_setting, key, report)
     try:
         profile = Profile.model_validate(await asyncio.to_thread(db.get_setting, "profile", {}))
@@ -967,7 +981,7 @@ async def scrape_source(source, db, config):
         await asyncio.to_thread(
             db.set_setting, REJECTED + source["id"], {"fp": fingerprint, "since": since, "urls": sorted(kept)[:2000]}
         )
-        report.update(state="complete", finished_at=now(), new=len(created))
+        report.update(state="complete", finished_at=now(), new=len(created), read_at=at.isoformat())
         await asyncio.to_thread(db.set_setting, key, report)
         return created
     except Exception as exc:
@@ -998,17 +1012,13 @@ def unconfirmed(at, interval_hours):
     seen = JobListing.last_seen
     # A read that STARTED after the listing was last seen and finished: a scan stamps what it sees with its own start time, and the
     # new-grad sweep stamps during its run, so a read's finish (or its own start) is never evidence about the listing it just saw.
-    sweep = (
-        select(Setting.value["started_at"].as_string())
-        .where(Setting.key == SWEEP_KEY, Setting.value["state"].as_string().in_(("done", "complete")))
-        .scalar_subquery()
+    # `read_at` survives the next read being queued, running or failed (keep_last_read); a flag written before it existed has its own start.
+    last_read = func.coalesce(
+        Setting.value["read_at"].as_string(),
+        case((Setting.value["state"].as_string().in_(READ_DONE), Setting.value["started_at"].as_string())),
     )
-    scan = (
-        select(Setting.value["started_at"].as_string())
-        .where(Setting.key == "job_board_scan:" + JobListing.source_id, Setting.value["state"].as_string() == "complete")
-        .correlate(JobListing)
-        .scalar_subquery()
-    )
+    sweep = select(last_read).where(Setting.key == SWEEP_KEY).scalar_subquery()
+    scan = select(last_read).where(Setting.key == "job_board_scan:" + JobListing.source_id).correlate(JobListing).scalar_subquery()
     read_since = func.coalesce(case((JobListing.source_id.startswith("feed:", autoescape=True), sweep), else_=scan), "") > seen
     cutoff = (at - timedelta(hours=seen_window_hours(interval_hours))).isoformat()
     unread = (at - timedelta(hours=UNREAD_HOURS)).isoformat()
@@ -1098,7 +1108,7 @@ async def request_scan(db, enqueue):
                 scan.get("started_at", started)
             ) < timedelta(hours=6):
                 continue
-            db.set_setting("job_board_scan:" + sid, {"state": "queued", "started_at": started})
+            db.set_setting("job_board_scan:" + sid, keep_last_read(scan, {"state": "queued", "started_at": started}))
             claimed.append(sid)
         return ids, claimed
 
@@ -1108,10 +1118,11 @@ async def request_scan(db, enqueue):
         try:
             queued += bool(await enqueue(sid))
         except Exception:
+            previous = await asyncio.to_thread(db.get_setting, "job_board_scan:" + sid, {})
             await asyncio.to_thread(
                 db.set_setting,
                 "job_board_scan:" + sid,
-                {"state": "error", "started_at": started, "error": "Could not queue this source"},
+                keep_last_read(previous, {"state": "error", "started_at": started, "error": "Could not queue this source"}),
             )
     await asyncio.to_thread(db.set_setting, "job_board_requested", {"at": started})
     return ids, queued

@@ -211,7 +211,7 @@ def confirmed_since(session, started_at):
 def batch_snapshot(service):
     """Authoritative distinct-job progress, never a count of retry attempts."""
     from .db import JobListing
-    from .jobboard import us_location, within_window
+    from .jobboard import unconfirmed, us_location, within_window
     from .pipeline_comparison import snapshot as worker_snapshot
 
     db, cfg = service.db, settings(service.db)
@@ -280,8 +280,7 @@ def batch_snapshot(service):
                     Job.status != "archived",
                     within_window(cfg, at),
                     JobListing.posted_at <= at.isoformat(),
-                    JobListing.last_seen
-                    >= (at - timedelta(hours=max(6, cfg.interval_hours * 2 + 1))).isoformat(),
+                    ~unconfirmed(at, cfg.interval_hours),
                 )
             )
         )
