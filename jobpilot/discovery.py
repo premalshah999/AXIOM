@@ -318,7 +318,11 @@ async def application_entry(url):
 
 
 def add_job(db, data: JobInput, demo=False, origin="unknown"):
+    from .posting_identity import placeholder_company
+
     url, identity = canonicalize(data.url)
+    if data.company and placeholder_company(data.company, url):
+        data = data.model_copy(update={"company": ""})  # An id or a hostname is no employer: it is read from the posting (read_blank_titles).
     with db.exclusive() as s:
         existing = s.scalar(select(Job).where(Job.identity == identity))
         if not existing:
@@ -498,6 +502,15 @@ async def enrich(db, config, job_id):
             "description": soup.get_text(" ", strip=True)[:40000],
             "title": "" if placeholder_title(page_title) else page_title,
         }
+    if not details.get("company"):
+        # Only what the page states about its one posting (microdata, an ATS's page props): see posting_identity.
+        from .posting_identity import identity, page_inputs, placeholder_company
+
+        try:
+            stated = identity(page_inputs(html)).get("company", "")
+            details["company"] = "" if placeholder_company(stated, url) else stated
+        except Exception:  # noqa: BLE001 - unreadable markup is no evidence.
+            pass
     with db.session() as s:
         item = s.get(Job, job_id)
         for key, value in details.items():
@@ -520,11 +533,11 @@ UNREAD_TRIES = "title_read:"
 
 
 async def read_blank_titles(db, config, limit=30):
-    """Jobs saved with no role (links pasted before the role was read at adding): read each page once a day, a few per start."""
+    """Jobs saved with no role or no employer (links pasted before they were read at adding): read each page once a day, a few per start."""
     from .db import Setting
 
     with db.session() as s:
-        blank = [j for j in s.scalars(select(Job.id).where(Job.title == "", Job.demo.is_(False), Job.status.notin_(("archived", "closed"))).limit(limit * 3))]
+        blank = [j for j in s.scalars(select(Job.id).where(or_(Job.title == "", Job.company == ""), Job.demo.is_(False), Job.status.notin_(("archived", "closed"))).limit(limit * 3))]
     done = 0
     for job_id in blank:
         if done >= limit:

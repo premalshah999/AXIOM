@@ -237,7 +237,14 @@ export function BoardView() {
   }, [searching, reread]);
   // What the search has done so far, in the words the person would use: boards read of all.
   const progress = b && searching && b.scan_total ? `${(b.scan_read ?? 0).toLocaleString()} of ${b.scan_total.toLocaleString()} employer boards read` : "";
-  const span = !b ? "" : b.window >= 720 ? "30 days" : b.window >= 168 ? "7 days" : "48 hours";
+  // What the rows are, from the same two windows that chose them (BoardSettings.window_hours): an employer's own board shows a posting is
+  // still open, so it stays longer. The words said "the last 30 days" over rows up to 60 days old.
+  const age = (hours: number) => (hours < 72 ? `${hours} hours` : `${Math.round(hours / 24)} days`);
+  const span = !b
+    ? ""
+    : (b.live_window ?? b.window) > b.window
+      ? `up to ${age(b.live_window ?? b.window)} old from employers' own boards, which show a posting is still open, and up to ${age(b.window)} from anywhere else`
+      : `from the last ${age(b.window)}`;
   const everSearched = !!b?.searched_at || searching;
   const inTheQueue = b?.in_queue ?? 0;
   // How many wait, and the way to them: the answer to "where did it go?".
@@ -438,7 +445,7 @@ export function BoardView() {
       {b && !planning && !sites && (
         <TopLine>
           {everSearched || b.all > 0
-            ? `${b.all.toLocaleString()} open US ${b.all === 1 ? "posting" : "postings"} from the last ${span}, with closed ones and duplicates left out.`
+            ? `${b.all.toLocaleString()} open US ${b.all === 1 ? "posting" : "postings"} ${span}, with closed ones and duplicates left out${b.in_line_older ? `, plus ${b.in_line_older.toLocaleString()} older already in your queue` : ""}.`
             : "No search has run yet."}
           {progress ? ` Searching: ${progress}.` : b.searched_at ? ` Last searched ${ago(b.searched_at, now)}.` : ""}
           {queueLine}{" "}

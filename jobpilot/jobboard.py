@@ -16,7 +16,7 @@ from pathlib import Path
 
 from bs4 import BeautifulSoup
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import and_, case, func, or_, select
 
 from .db import Job, JobListing, Run, Setting, Source, now
 from .board_data import clean_location, expired_internship
@@ -169,6 +169,15 @@ def us_location(location, country=""):
     if FOREIGN.search(location or ""):
         return False
     return bool(US_PLACE.search(location or "") or US_REGION.search(location or ""))
+
+
+def us_places(location):
+    """The places of a multi-place posting that are not named as another country. The board lists US roles, and one that is open in
+    "Austin, TX; Toronto, Canada; London, UK" is listed for Austin: showing all three read as a foreign row (the owner counted 4,
+    2026-11-02). A place this cannot tell stays; a posting with no US place shown is returned as it was."""
+    parts = [x for x in re.split(r"\s*(?:;|\||\s/\s)\s*", str(location or "")) if x.strip()]
+    kept = [x for x in parts if not FOREIGN.search(x) or US_PLACE.search(x) and not FOREIGN.search(US_PLACE.sub(" ", x))]
+    return "; ".join(kept) if kept and len(kept) < len(parts) else str(location or "")
 
 
 NO_PARTICULAR_PLACE = re.compile(
@@ -403,6 +412,15 @@ def is_managed(db, source_id):
     return source_id in managed_ids(db)
 
 
+def _hiring_organization(obj, url):
+    """The employer a posting's own structured data names, if it is a name."""
+    from .posting_identity import placeholder_company
+
+    org = obj.get("hiringOrganization")
+    name = " ".join(str((org.get("name") if isinstance(org, dict) else org) or "").split())[:300]
+    return "" if placeholder_company(name, url) else name
+
+
 async def document_post(url, company):
     body, final = await fetch(url)
     soup = BeautifulSoup(body, "html.parser")
@@ -437,7 +455,7 @@ async def document_post(url, company):
                     return Posting(
                         final,
                         obj.get("title", ""),
-                        company,
+                        company or _hiring_organization(obj, final),
                         loc or "United States",
                         text(obj.get("description")),
                         str(country),
@@ -453,7 +471,7 @@ async def document_post(url, company):
                 return Posting(
                     final,
                     obj.get("title", ""),
-                    company,
+                    company or _hiring_organization(obj, final),
                     "Remote — United States",
                     text(obj.get("description")),
                     "US",
@@ -533,6 +551,7 @@ async def read_feed(source, profile, cfg, at, known=None):
         data = await get(f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs")
         candidates = []
         for j in data.get("jobs", []):
+            source["stated_name"] = source.get("stated_name") or j.get("company_name") or ""  # board_names.save_stated
             link = f"https://job-boards.greenhouse.io/{slug}/jobs/{j['id']}"
             seen.add(link)
             post = Posting(link, j["title"], company, j.get("location", {}).get("name", ""))
@@ -585,10 +604,12 @@ async def read_feed(source, profile, cfg, at, known=None):
                 link = f"https://jobs.smartrecruiters.com/{slug}/{j['id']}"
                 seen.add(link)
                 loc = j.get("location", {})
+                stated = (j.get("company") or {}).get("name") or ""
+                source["stated_name"] = source.get("stated_name") or stated  # board_names.save_stated
                 post = Posting(
                     link,
                     j["name"],
-                    company,
+                    stated or company,
                     ", ".join(str(loc[k]) for k in ("city", "region", "country") if loc.get(k)),
                     country=loc.get("country", ""),
                     posted=j.get("releasedDate"),
@@ -921,13 +942,25 @@ def persist_scan(db, source, posts, seen, complete, cfg, profile, at, report):
     return created, rejected
 
 
+READ_DONE = ("done", "complete")  # A board's scan and the new-grad sweep name a finished read differently.
+
+
+def keep_last_read(previous, flag):
+    """`flag` with the start of the last read that took in the whole board (`read_at`), taken from the `previous` flag it replaces.
+
+    What such a read proved must outlive the flag: each search rewrites every board's flag to "queued", and a read may then fail,
+    and the board brought back every listing that read had missed, for a whole scan round or until the board answered again."""
+    kept = (previous or {}).get("read_at")
+    return {**flag, "read_at": kept} if kept is not None else flag
+
+
 async def scrape_source(source, db, config):
     cfg = settings(db)
     if not cfg.enabled:
         return []
     at = datetime.now(UTC)
     key = "job_board_scan:" + source["id"]
-    report = {
+    report = keep_last_read(await asyncio.to_thread(db.get_setting, key, {}), {
         "state": "running",
         "started_at": at.isoformat(),
         "checked": 0,
@@ -936,7 +969,7 @@ async def scrape_source(source, db, config):
         "old": 0,
         "unknown_date": 0,
         "excluded": 0,
-    }
+    })
     await asyncio.to_thread(db.set_setting, key, report)
     try:
         profile = Profile.model_validate(await asyncio.to_thread(db.get_setting, "profile", {}))
@@ -946,7 +979,11 @@ async def scrape_source(source, db, config):
         async def known(links):
             return set(await asyncio.to_thread(listed_links, db, links)) | skip.intersection(links)
 
+        from .board_names import named, save_stated
+
+        source = await named(source, db, fetch)  # The employer its postings are read under: the board's real name, never its slug or id.
         posts, seen, complete, errors = await read_feed(source, profile, cfg, at, known)
+        await asyncio.to_thread(save_stated, db, source)
         report.update(checked=len(seen), detail_errors=errors, read=len(posts))
         created, rejected = await asyncio.to_thread(
             persist_scan, db, source, posts, seen, complete, cfg, profile, at, report
@@ -958,6 +995,10 @@ async def scrape_source(source, db, config):
         await asyncio.to_thread(
             db.set_setting, REJECTED + source["id"], {"fp": fingerprint, "since": since, "urls": sorted(kept)[:2000]}
         )
+        if complete:
+            # Only a read of the whole board shows a listing is gone: Workday's searches and SmartRecruiters' recent postings name
+            # some of what is open (read_feed), so their absence says nothing (unconfirmed).
+            report["read_at"] = at.isoformat()
         report.update(state="complete", finished_at=now(), new=len(created))
         await asyncio.to_thread(db.set_setting, key, report)
         return created
@@ -967,6 +1008,43 @@ async def scrape_source(source, db, config):
         )
         await asyncio.to_thread(db.set_setting, key, report)
         raise
+
+
+UNREAD_HOURS = 72  # With no read of its whole board, a listing not seen for this long is no longer called open (dozens of searches missed it, or the app has not looked in days).
+
+
+def seen_window_hours(interval_hours):
+    return max(6, (interval_hours or 2) * 2 + 1)
+
+
+def unconfirmed(at, interval_hours):
+    """SQL: a listing that is no longer shown as open because it was not seen lately AND that means it is gone.
+
+    Not seen within the window is not enough: a Mac that sleeps, or a scan that works through thousands of boards over hours,
+    leaves listings unread for longer than the window while nothing has found them gone, and the board read "No open postings"
+    until the scans caught up (production 2026-11-02: 2,710 of 5,270 active listings were past a 6-hour cutoff). A listing is
+    gone when its own whole board, or the new-grad list, was read successfully after it was last seen and did not show it. A partial
+    read proves nothing: Workday is searched, and 696 of 2,140 Workday listings were hidden by searches that merely did not return
+    them. Until then it stays open, for at most UNREAD_HOURS."""
+    from .features.discovery.feeds import SWEEP_KEY
+
+    seen = JobListing.last_seen
+    # A read that STARTED after the listing was last seen and finished: a scan stamps what it sees with its own start time, and the
+    # new-grad sweep stamps during its run, so a read's finish (or its own start) is never evidence about the listing it just saw.
+    # `read_at` survives the next read being queued, running or failed (keep_last_read). A scan flag from before it existed cannot say
+    # its read was whole, and proves nothing; a whole-list board that dropped a listing has already marked it inactive (persist_scan).
+    # A finished sweep read every list unless it says otherwise, so its older flag still counts.
+    read_at = Setting.value["read_at"].as_string()
+    sweep = (
+        select(func.coalesce(read_at, case((Setting.value["state"].as_string().in_(READ_DONE), Setting.value["started_at"].as_string()))))
+        .where(Setting.key == SWEEP_KEY)
+        .scalar_subquery()
+    )
+    scan = select(read_at).where(Setting.key == "job_board_scan:" + JobListing.source_id).correlate(JobListing).scalar_subquery()
+    read_since = func.coalesce(case((JobListing.source_id.startswith("feed:", autoescape=True), sweep), else_=scan), "") > seen
+    cutoff = (at - timedelta(hours=seen_window_hours(interval_hours))).isoformat()
+    unread = (at - timedelta(hours=UNREAD_HOURS)).isoformat()
+    return and_(seen < cutoff, or_(seen < unread, read_since))
 
 
 LISTED = "listing__"
@@ -1030,6 +1108,24 @@ def backed_off(db, ids, at):
     return out
 
 
+def one_of_each(boards):
+    """(id, kind) boards as ids, one board of each platform in turn. In catalog order a new install read every Ashby board first: after
+    four minutes all 58 boards read and every request were on one host, and all a new user could see was the platform that starts
+    one application every 150 seconds."""
+    kinds = {}
+    for board_id, kind in boards:
+        kinds.setdefault(kind, []).append(board_id)
+    out, turn = [], [iter(ids) for ids in kinds.values()]
+    while turn:
+        for ids in list(turn):
+            board_id = next(ids, None)
+            if board_id is None:
+                turn.remove(ids)
+            else:
+                out.append(board_id)
+    return out
+
+
 async def request_scan(db, enqueue):
     """Queue a scan of every managed board now: the Search now button, and the first search of a new install.
     Returns (ids of all boards, how many were queued). A board already queued or running is left alone."""
@@ -1041,7 +1137,7 @@ async def request_scan(db, enqueue):
         setup_sources(db)
         with db.session() as s:
             wanted = Source.id.in_(managed_ids(db))
-            ids = list(s.scalars(select(Source.id).where(wanted, Source.enabled.is_(True))))
+            ids = one_of_each(s.execute(select(Source.id, Source.kind).where(wanted, Source.enabled.is_(True))).all())
         claimed = []
         dead = backed_off(db, ids, datetime.now(UTC))
         for sid in ids:
@@ -1052,7 +1148,7 @@ async def request_scan(db, enqueue):
                 scan.get("started_at", started)
             ) < timedelta(hours=6):
                 continue
-            db.set_setting("job_board_scan:" + sid, {"state": "queued", "started_at": started})
+            db.set_setting("job_board_scan:" + sid, keep_last_read(scan, {"state": "queued", "started_at": started}))
             claimed.append(sid)
         return ids, claimed
 
@@ -1062,10 +1158,11 @@ async def request_scan(db, enqueue):
         try:
             queued += bool(await enqueue(sid))
         except Exception:
+            previous = await asyncio.to_thread(db.get_setting, "job_board_scan:" + sid, {})
             await asyncio.to_thread(
                 db.set_setting,
                 "job_board_scan:" + sid,
-                {"state": "error", "started_at": started, "error": "Could not queue this source"},
+                keep_last_read(previous, {"state": "error", "started_at": started, "error": "Could not queue this source"}),
             )
     await asyncio.to_thread(db.set_setting, "job_board_requested", {"at": started})
     return ids, queued
@@ -1089,7 +1186,6 @@ def board_snapshot(db, limit=500, *, jobs_only=False):
     dropped were 22% of the executor threads' interpreter time and most of this function's garbage (py-spy 2026-10-30)."""
     cfg = settings(db)
     at = datetime.now(UTC)
-    seen_cutoff = (at - timedelta(hours=max(6, cfg.interval_hours * 2 + 1))).isoformat()
     ids = set() if jobs_only else managed_ids(db)
     with db.session() as s:
         # Columns, not whole rows: every fresh posting's description was read (and dropped) on each board poll and
@@ -1111,7 +1207,7 @@ def board_snapshot(db, limit=500, *, jobs_only=False):
                 JobListing.country == "US",
                 within_window(cfg, at),
                 JobListing.posted_at <= at.isoformat(),
-                JobListing.last_seen >= seen_cutoff,
+                ~unconfirmed(at, cfg.interval_hours),
                 Job.demo.is_(False),
                 Job.status != "archived",
             )
@@ -1209,6 +1305,8 @@ CATALOG = {
         "quora",
         "mercor",
         ("Grow Therapy", "https://jobs.ashbyhq.com/grow-therapy"),
+        # Its organisation's own name on Ashby is this id; the board states its site, shield.ai.
+        ("Shield AI", "https://jobs.ashbyhq.com/f7d8749a-72d6-407c-bf98-292ea630c73a"),
     ],
     "greenhouse": [
         "stripe",
@@ -1289,6 +1387,9 @@ def setup_sources(db, cfg=None):
     cfg = cfg or settings(db)
     if cfg.interval_hours not in {1, 2, 3, 6}:
         raise ValueError("Choose a 1, 2, 3 or 6 hour refresh interval")
+    from .board_names import rename_board_jobs
+    from .posting_identity import placeholder_company
+
     ids = managed_ids(db)
     owner_disabled = set(db.get_setting(OWNER_DISABLED_KEY, {}).get("ids", []))
     with db.exclusive() as s:
@@ -1352,6 +1453,9 @@ def setup_sources(db, cfg=None):
                 row = s.scalar(select(Source).where(Source.url == url))
                 if row and row.id not in ids:
                     continue  # Preserve separately configured sources and their policies.
+                if row and row.name != name and placeholder_company(row.name, url) and not placeholder_company(name, url):
+                    rename_board_jobs(s, row.id, row.name, name)  # The catalog knows a board an earlier build saved under its id.
+                    row.name = name
                 if not row:
                     row = Source(
                         name=name,
@@ -1393,6 +1497,8 @@ def add_managed_sources(db, entries):
     """Add (kind, name, url) boards as managed sources, scanned from the next tick; returns how many were new.
     Existing sources (any URL spelling of the same board, also within `entries`) are left alone, and a retired board
     is never re-added."""
+    from .posting_identity import INTERNAL_ID
+
     cfg = settings(db)
     retired = {"https://job-boards.greenhouse.io/" + slug for slug in ["snowflake", "confluent", "rippling", "aetion"]}
     retired |= {"https://jobs.lever.co/" + slug for slug in ["netflix", "viking", "welocalize"]}
@@ -1404,7 +1510,7 @@ def add_managed_sources(db, entries):
             if key in have or url in retired:
                 continue
             row = Source(
-                name=name[:200] or url,
+                name=("" if INTERNAL_ID.fullmatch(name or "") else name[:200]) or url,
                 kind=kind,
                 url=url,
                 cron=f"0 */{cfg.interval_hours} * * *",

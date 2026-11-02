@@ -186,15 +186,21 @@ def router(service) -> APIRouter:
         return {**shown, "startable": value["startable"] + asked, "ready": value["ready"] + asked}
 
     @r.get("/api/board")
-    def job_board_page(
+    async def job_board_page(
         q: str = "", role: str = "all", company: str = "all", place: str = "all", posted: str = "all", platform: str = "all",
         fit: Literal["match", "other", "all"] = "match", sort: Literal["fit", "newest", "company"] = "fit", page: int = 1, size: int = 25,
         level: str = "all", group: bool = True, want: Literal["page", "rows", "ids"] = "page", section: Literal["main", "sites"] = "main",
     ):
-        """The Job board (board_view.py): one page of open postings, filters with exact counts. A `def` route: it reads on a worker thread."""
-        from ...board_view import page as board_page
+        """The Job board (board_view.py): one page of open postings, filters with exact counts. It reads on a worker thread."""
+        from ...board_view import companies_to_warm, page as board_page, warm_logos
 
-        return board_page(service, q[:200], role[:200], company[:200], place[:40], posted[:4], platform[:40], fit, sort, page, size, level[:20], group, want, section)
+        answer = await asyncio.to_thread(
+            board_page, service, q[:200], role[:200], company[:200], place[:40], posted[:4], platform[:40], fit, sort, page, size, level[:20], group, want, section
+        )
+        if want == "page" and not answer.get("planning"):
+            # The icons of the next pages too, so they are there when someone scrolls to them (a background lookup, polite: one company's own pages).
+            warm_logos(service, companies_to_warm(service))
+        return answer
 
     @r.get("/api/job-board")
     def snapshot(

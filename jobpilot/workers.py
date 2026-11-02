@@ -622,13 +622,16 @@ async def requeue_orphaned_scans(service):
                 for key, value in s.execute(pick(Setting.key, Setting.value).where(Setting.key.startswith("job_board_scan:", autoescape=True)))
             }
 
-    for sid in orphaned_scans(await asyncio.to_thread(flags), live):
+    from .jobboard import keep_last_read
+
+    current = await asyncio.to_thread(flags)
+    for sid in orphaned_scans(current, live):
         try:
-            service.db.set_setting("job_board_scan:" + sid, {"state": "queued", "started_at": now()})
+            service.db.set_setting("job_board_scan:" + sid, keep_last_read(current[sid], {"state": "queued", "started_at": now()}))
             await enqueue_source(sid)
         except Exception:
             service.db.set_setting(
-                "job_board_scan:" + sid, {"state": "error", "started_at": now(), "error": "Could not queue this source"}
+                "job_board_scan:" + sid, keep_last_read(current[sid], {"state": "error", "started_at": now(), "error": "Could not queue this source"})
             )
 
 

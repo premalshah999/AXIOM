@@ -38,6 +38,7 @@ class Service(QueueingMixin, ExecutionMixin, CompletionMixin, ReviewsMixin, Migr
 
         leave_the_queue(db)  # A company's own site waiting in line leaves it (kept, not deleted); the owner sends it from Company sites
         self.employer_names_from_titles()
+        self.no_ids_as_employers()
         self.tidy_board_data()
         from ..features._store import create_tables
 

@@ -45,8 +45,8 @@ def test_blank_closed_and_gone_rows_never_reach_the_board(service):
     listing(service, "closed", company="Gamma Example", status="closed")
     listing(service, "taken-down", company="Delta Example", active=False)
     got = rows(service, fit="all")
-    assert [r["id"] for r in got["rows"]] == [good]
-    assert got["hidden"]["blank"] == 2
+    assert {r["id"]: r["company"] for r in got["rows"]} == {good: "Alpha Example", "blank-company": "Company not listed"}
+    assert got["hidden"]["blank"] == 1
 
 
 def test_a_job_with_a_run_is_not_on_the_board(service):
@@ -163,3 +163,37 @@ def test_a_first_read_that_fails_says_so_instead_of_loading_for_good(service, mo
     shelf.busy.acquire()
     shelf._fill(service)
     assert board_view.page(service).get("failed") in (None, False)
+
+
+def test_the_board_says_how_old_its_rows_can_be_and_no_row_is_older(service):
+    """The header said "the last 30 days" over rows up to 60 days old: an employer's own board keeps a posting longer, since it shows it is still
+    open. The answer states both windows, and every row is inside the one that applies to it."""
+    from jobpilot.db import Source
+
+    setup(service)
+    with service.db.exclusive() as s:
+        s.add(Source(id="live", name="Live Example", kind="greenhouse", url="https://job-boards.greenhouse.io/live", cron="0 * * * *"))
+        s.add(Source(id="other", name="Other Example", kind="career_page", url="https://careers.example.test/", cron="0 * * * *"))
+
+    def posted(jid, company, source, days, status="new"):
+        at = (datetime.now(UTC) - timedelta(days=days)).isoformat()
+        listing(service, jid, company=company, status=status, score=None if status == "new" else 80)
+        with service.db.exclusive() as s:
+            row = s.get(JobListing, jid)
+            row.source_id, row.posted_at = source, at
+
+    posted("live-50", "Live Example", "live", 50)
+    posted("live-70", "Live Example Two", "live", 70)
+    posted("other-20", "Other Example", "other", 20)
+    posted("other-50", "Other Example Two", "other", 50)
+    got = rows(service, fit="all")
+    assert (got["window"], got["live_window"], got["in_line_older"]) == (720, 1440, 0)
+    assert {r["id"] for r in got["rows"]} == {"live-50", "other-20"}
+    # A job already in line keeps its row at any age, and the answer counts it, so the header can say so.
+    posted("line-70", "Line Example", "live", 70, status="ready")
+    from jobpilot import queue_order, startable
+
+    startable.reading(service).reload(service)
+    queue_order.plans(service).now(service)
+    got = rows(service, fit="all")
+    assert {r["id"] for r in got["rows"]} == {"live-50", "other-20", "line-70"} and got["in_line_older"] == 1

@@ -212,6 +212,8 @@ def employer_of(text):
     text = " ".join(str(text or "").split())
     if not text:
         raise ValueError("Type a company name or paste a link to its job board")
+    if text.casefold() == "company not listed":
+        raise ValueError("This posting does not name its company yet, so there is nothing to reserve.")
     site = re.sub(r"^www\.", "", re.sub(r"^[a-z]+://", "", text.casefold()).split("?")[0].split("#")[0].rstrip("/"))
     if " " in text or not SITE.match(site):
         return text[:80], []

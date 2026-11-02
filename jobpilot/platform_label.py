@@ -16,7 +16,7 @@ import re
 import time
 from urllib.parse import urlsplit
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from .ats import (
     LABEL_ONLY,
@@ -30,7 +30,7 @@ from .ats import (
     url_platform,
 )
 from .db import Event, Job, Run, Setting
-from .shortlinks import is_shortlink
+from .shortlinks import SHORTENER_HOSTS, is_shortlink
 
 # A job in one of these has a run in flight, an application that may still be reconciled, or an archived draft: its label
 # is not touched from outside the run. A confirmed or already-applied job may be relabelled (nothing runs for it again), so
@@ -164,3 +164,29 @@ def target_platform(final):
         return None
     landed = detect(final).id
     return landed if not unsettled(landed) else url_platform(final)
+
+
+def label_resolved_short_links(db):
+    """Jobs still at a short link take the platform of the posting it was seen to lead to. The startup pass (above) labels those once; a link
+    the new-grad sweep resolves after that kept "custom" until the next start, and custom-site jobs leave the main Job board list (111 of
+    235 short-link postings, 2026-11-02, five of them on Lever, Eightfold or Avature). Touches only the short-link rows: the sweep calls it.
+    Returns how many labels changed."""
+    hosts = sorted(SHORTENER_HOSTS)
+    with db.session() as s:
+        rows = [
+            (job_id, url)
+            for job_id, url, ats, status in s.execute(
+                select(Job.id, Job.url, Job.ats, Job.status).where(
+                    Job.demo.is_(False), or_(*(Job.url.startswith(f"https://{host}/", autoescape=True) for host in hosts))
+                )
+            )
+            if (custom_like(ats) or ats in VENDORS) and status not in BUSY
+        ]
+    if not rows:
+        return 0
+    targets = short_link_targets(db)
+    changed = 0
+    for job_id, url in rows:
+        if target := target_platform(targets.get(url)):
+            changed += bool(record_observed_platform(db, job_id, target, outside_run=True))
+    return changed

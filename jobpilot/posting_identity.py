@@ -22,6 +22,7 @@ MICRO_ORG = re.compile(r'<meta[^>]*itemprop=["\']hiringOrganization["\'][^>]*>',
 MICRO_CONTENT = re.compile(r'content=["\']([^"\']*)["\']', re.I)
 MICRO_TITLE = re.compile(r'itemprop=["\']title["\'][^>]*>([^<]{1,500})<', re.I)
 HOSTNAME = re.compile(r"(?:[a-z0-9-]+\.)+[a-z]{2,}")
+INTERNAL_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
 UNTITLED = re.compile(r"untitled(?: role)?", re.I)
 MAX_TITLE, MAX_COMPANY, MAX_PAGE = 500, 300, 3_000_000
 
@@ -118,9 +119,10 @@ def _site(host):
 
 
 def placeholder_company(value, url):
-    """No company, or just the job's own hostname (or a host of its site)."""
+    """No company, an internal id (one Ashby organisation's own name is a UUID), the screens' words for no name, or just the job's own
+    hostname (or a host of its site)."""
     value = (value or "").strip().lower()
-    if not value:
+    if not value or INTERNAL_ID.fullmatch(value) or value == "company not listed":
         return True
     return bool(HOSTNAME.fullmatch(value)) and _site(value) == _site(urlsplit(url or "").hostname)
 
