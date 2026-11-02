@@ -1,6 +1,7 @@
 import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { LegalGate } from "./legal";
+import { LicenseBanner, LicenseGate } from "./license";
 import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/components.css";
@@ -333,6 +334,7 @@ function App() {
           }}
           banners={
             <>
+              <LicenseBanner />
               {setupGuide === "later" && (
                 <div className="ax-banner" role="status">
                   <span>Your profile setup isn't finished.</span>
@@ -415,6 +417,8 @@ function App() {
 
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <App />
+    <LicenseGate>
+      <App />
+    </LicenseGate>
   </React.StrictMode>,
 );

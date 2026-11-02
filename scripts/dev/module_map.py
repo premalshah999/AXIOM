@@ -172,6 +172,7 @@ MAP = {
     "operations/superseded.py":          ("control:ops/superseded.py", "close_superseded_waits runs inside completion and moves to the ledger"),
 
     # ---- control: the owner ------------------------------------------------------------------------------------------
+    "licensing.py":                      ("control:owner/licensing.py", "the owner's offline license key (docs/LICENSING.md)"),
     "owner_account.py":                  ("control:owner/account.py", ""),
     "owner_apply.py":                    ("control:owner/apply.py", "`picked` moves to ledger:admission.py"),
     "owner_questions.py":                ("control:owner/questions.py", "split: document_for, generic, row_for are read at fill time and move to domain:answers/owner_view.py"),
@@ -191,6 +192,7 @@ MAP = {
     "api/routes/demo.py":                ("control:gateway/routes/demo.py", ""),
     "api/routes/frontend.py":            ("control:gateway/routes/frontend.py", ""),
     "api/routes/health.py":              ("control:gateway/routes/health.py", ""),
+    "api/routes/license.py":             ("control:gateway/routes/license.py", ""),
     "api/routes/job_board.py":           ("control:gateway/routes/job_board.py", "Proxies to discovery /v1"),
     "api/routes/jobs.py":                ("control:gateway/routes/jobs.py", ""),
     "api/routes/knowledge.py":           ("control:gateway/routes/knowledge.py", ""),

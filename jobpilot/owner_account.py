@@ -36,6 +36,9 @@ PUBLIC_PATHS = {
     "/api/account/signup",
     "/api/account/login",
     "/api/account/reset",
+    # The license screen comes before any account exists (jobpilot/licensing.py).
+    "/api/license",
+    "/api/license/key",
 }
 ONBOARDING_STEPS = (
     "resume",

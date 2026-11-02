@@ -2,11 +2,12 @@ import { Link2, Moon, Search, Sun } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { useWorkspace } from "../context";
+import { useLicense } from "../license";
 import { OPEN_JOB_LINK } from "../jobintake";
 import { STATES, stateInfo } from "../model";
 import { Monogram } from "../ui/Monogram";
 import type { Listing, PipelinePage } from "../types";
-import { ALL_ITEMS, PAGE_TABS } from "./nav";
+import { ALL_ITEMS, PAGE_TABS, settingsTabs } from "./nav";
 import { useTheme } from "./prefs";
 
 type Entry = {
@@ -29,6 +30,7 @@ const GROUP_ORDER = ["Pages", "Jobs", "Actions"] as const;
  */
 export function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { go, openJob } = useWorkspace();
+  const licensed = !!useLicense().status?.required;
   const [theme, toggleTheme] = useTheme();
   const [q, setQ] = useState("");
   const [cursor, setCursor] = useState(0);
@@ -106,7 +108,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
     }));
     // A page's tabs ("Discovered", "Accounts") are places to jump to as well, once something is typed.
     const tabs: Entry[] = ALL_ITEMS.flatMap((i) =>
-      (PAGE_TABS[i.route.view] || []).map<Entry>((t) => ({
+      (i.route.view === "settings" ? settingsTabs(licensed) : PAGE_TABS[i.route.view] || []).map<Entry>((t) => ({
         id: `tab:${i.id}:${t.id}`,
         group: "Pages",
         label: t.label,
@@ -142,7 +144,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
     // With no query, offer the pages and adding a link; with a query, every match: pages and tabs, then jobs, then actions.
     if (!needle) return [...pages, link];
     return [...pages.filter(match), ...tabs.filter(match), ...jobs, ...[link, switchTheme].filter(match)];
-  }, [term, hits, go, openJob, onClose, theme, toggleTheme]);
+  }, [term, hits, go, openJob, onClose, theme, toggleTheme, licensed]);
 
   useEffect(() => setCursor(0), [term, hits.length]);
   useEffect(() => {
