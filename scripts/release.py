@@ -12,7 +12,7 @@ Every stage's real exit status decides what happens next, never a pipe's (a red 
 The order is the point:
 
   preflight   right commit, clean tree, disk room, nothing half done, no earlier hold of someone else's to clobber
-  gate        scripts/dev/gate.sh release: the fast suite, then the gallery of real traps through the real engine; then, where this
+  gate        scripts/dev/gate.sh release: the fast suite, then the gallery of real traps through the real engine, then the smoke list of browser tests; then, where this
               computer has a private corpus, what this commit reads differently on real saved pages (reported, never blocking)
   build       desktop/build.sh
   verified    a complete copy outside the install location: signature, every file at its size, Python imports, and the copy's own
