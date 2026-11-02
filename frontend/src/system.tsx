@@ -203,6 +203,7 @@ function automation(rt: AutopilotRuntime, paused: boolean, sched: SchedulerHealt
 
 function modelState(model: NonNullable<RuntimeHealth["models"]>["answers"]) {
   if (!model) return "";
+  if (model.has_key === false) return "no key saved. Add one under Connections";
   return model.state === "ready"
     ? "ready"
     : model.state === "recovery_ready"

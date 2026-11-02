@@ -163,6 +163,22 @@ def profiles(config):
     return sorted(found)
 
 
+def clear_logs(say=None):
+    """The screen says everything goes, and the logs name employers. Old ones are deleted and live ones emptied in place, because the
+    supervisor and the database keep them open. This eraser's own log stays: it says what was removed, and holds nothing else."""
+    folder = os.environ.get("AXIOM_LOG_DIR")
+    if not folder:
+        return
+    for path in Path(folder).glob("*.log*"):
+        if path.name == log_path().name or not path.is_file():
+            continue
+        try:
+            os.truncate(path, 0) if path.name.endswith(".log") else path.unlink()
+        except OSError:
+            if say:
+                say(f"Could not clear the log {path.name}.")
+
+
 def run(config, *, after_pid=0, say=print, backups=None):
     """Delete everything, in this order: wait for the application to be gone, close the Chromes, empty the database, the files, the
     copies. Returns a list of what could not be removed (empty when all went)."""
@@ -204,6 +220,7 @@ def run(config, *, after_pid=0, say=print, backups=None):
             folder.rmdir()  # Only when nothing else of the owner's is in it.
         except OSError:
             pass
+    clear_logs(say)
     say("Done." if not problems else "Done, except: " + ", ".join(problems))
     return problems
 

@@ -40,6 +40,19 @@ def test_everything_goes_and_only_scaffolding_stays(tmp_path):
     assert [p.name for p in backups.iterdir()] == ["someone-elses.txt"]
 
 
+def test_the_logs_are_cleared_with_the_rest(tmp_path, monkeypatch):
+    config, data, backups = populated(tmp_path)
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    for name in ("app.log", "app.log.1", "postgres.log", "axiom-erase.log"):
+        (logs / name).write_text("Example Employer\n")
+    monkeypatch.setenv("AXIOM_LOG_DIR", str(logs))
+    erase.run(config, say=lambda _: None, backups=backups)
+    assert (logs / "app.log").read_text() == "" and (logs / "postgres.log").read_text() == ""  # Kept open by what still runs.
+    assert not (logs / "app.log.1").exists()
+    assert (logs / "axiom-erase.log").read_text()  # What was removed, and nothing else.
+
+
 def test_an_empty_backup_folder_is_removed_with_its_last_copy(tmp_path):
     config, data, backups = populated(tmp_path)
     (backups / "someone-elses.txt").unlink()

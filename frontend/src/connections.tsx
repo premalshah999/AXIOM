@@ -103,8 +103,10 @@ export function useConnections() {
       run(
         "save",
         async () => {
-          await api<Connections>("/connections", "PUT", { values: draft });
-          setDraft({});
+          const sent = draft;
+          await api<Connections>("/connections", "PUT", { values: sent });
+          // What was typed while this save was on its way is still a change.
+          setDraft((d) => Object.fromEntries(Object.entries(d).filter(([k, v]) => sent[k] !== v)));
           // A "Works" from before this save may be about a key that is gone.
           setResults({});
           setEpoch((e) => e + 1);
