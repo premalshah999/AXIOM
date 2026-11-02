@@ -1313,6 +1313,11 @@ class Adapter:
 
             if not self.committed and missing_posting_notice(obs, self.job["url"]):
                 return await self.on_closed(obs)
+            stay = getattr(self.e, "stay_on_posting", None)
+            if stay and not self.committed and await stay(obs):
+                if getattr(self.e, "result", None):
+                    return self.e.result
+                continue
             from ..account_identity import stop_if_identity_conflict
 
             if await stop_if_identity_conflict(self.e, obs):
