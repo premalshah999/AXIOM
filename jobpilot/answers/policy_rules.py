@@ -83,6 +83,17 @@ class PolicyRulesMixin:
                         reason="Confirmed No",
                     )
         facts = self.profile.facts or {}
+        if re.search(
+            r"\bdid you (?:already |previously )?(?:complete|finish|take|fill out)(?:d)? (?:the |this )?(?:WOTC|work opportunity tax credit)"
+            r"(?: online| tax credit)? (?:survey|questionnaire|screening|form)\b",
+            question_head(label) or label,
+            re.I,
+        ):
+            # Regions (2026-11-01): the model answered Yes to "Did you complete the WOTC survey?", which asked for a
+            # confirmation number that does not exist. The survey is an external link the application never completes.
+            no = [o for o in options if NO_OPTION.search(str(o)) and not DECLINE.search(str(o))]
+            if len(no) == 1:
+                return self._ans(f, no[0], ["policy:wotc-survey-not-completed"], "No WOTC survey was completed")
         if (
             WOTC.search(label)
             and not DEMOGRAPHIC.search(label)
