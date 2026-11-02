@@ -10,6 +10,7 @@ import { PdfPages, usePdf } from "./pdfpages";
 import { SwitchRow } from "./setup-kit";
 import { Button, Loading, Panel, Pill } from "./ui/index";
 import { AggressiveDrafts } from "./aggressive";
+import { rowFetchesItself } from "./tailorbatch";
 import "./styles/tailoring.css";
 
 // ---------- What the server sends ----------
@@ -20,7 +21,7 @@ type Doc = { name: string; contact: string[]; sections: Section[] };
 type Keyword = { term: string; tier: "required" | "duties" | "preferred"; weight: number; pattern: string; status: string; in_evidence: boolean };
 type Score = { score: number | null; keywords: Keyword[]; method: string; disclaimer: string };
 type Problem = { code: string; where: string; message: string };
-type Mode = { id: string; label: string; note: string; available: boolean };
+export type Mode = { id: string; label: string; note: string; available: boolean };
 export type TailorState = { mode: string; state: "preparing" | "review" | "approved" | "failed" };
 type View = {
   job: { id: string; company: string; title: string; location: string; url: string; description: string; status: string };
@@ -174,13 +175,14 @@ function Diff({ from, to }: { from: string; to: string }) {
 /**
  * "Apply" or "Apply with tailored resume" and a mode. Off by default. On a list, pass `known` and `modes` from one GET /v2/resumes/tailor/choices?job_ids=... so
  * that each row doesn't ask for itself; alone, it reads for itself. `onChange` hears the state, so a row can react.
+ * `listed`: the list owns the state (it fetches once for the page and polls the rows that are preparing), so this row never asks and shows what it is given.
  */
-export function TailorChoice({ jobId, known, modes, compact, onChange }: { jobId: string; known?: TailorState | null; modes?: Mode[]; compact?: boolean; onChange?: (s: TailorState | null) => void }) {
+export function TailorChoice({ jobId, known, modes, compact, listed, onChange }: { jobId: string; known?: TailorState | null; modes?: Mode[]; compact?: boolean; listed?: boolean; onChange?: (s: TailorState | null) => void }) {
   const { go } = useWorkspace();
   const [own, setOwn] = useState<{ choice: TailorState | null; modes: Mode[]; error?: string } | null>(null);
   const [busy, setBusy] = useState(false);
-  const choice = known !== undefined && !own ? known : own?.choice ?? null;
-  const list = own?.modes?.length ? own.modes : modes;
+  const choice = listed ? known ?? null : known !== undefined && !own ? known : own?.choice ?? null;
+  const list = !listed && own?.modes?.length ? own.modes : modes;
   const load = useRef(async () => {
     const r = await api<{ choices: Record<string, TailorState>; modes: Mode[] }>(`/v2/resumes/tailor/choices?job_ids=${encodeURIComponent(jobId)}`);
     setOwn((was) => ({ ...was, choice: r.choices[jobId] ?? null, modes: r.modes }));
@@ -188,19 +190,20 @@ export function TailorChoice({ jobId, known, modes, compact, onChange }: { jobId
   });
   const preparing = choice?.state === "preparing";
   useEffect(() => {
-    if (known === undefined || !modes) void load.current().catch(() => undefined);
-  }, [known, modes]);
+    if (rowFetchesItself(!!listed, known, modes)) void load.current().catch(() => undefined);
+  }, [known, modes, listed]);
   useEffect(() => {
-    if (!preparing) return;
+    if (!preparing || listed) return;
     const t = setInterval(() => void load.current().catch(() => undefined), 2500);
     return () => clearInterval(t);
-  }, [preparing]);
+  }, [preparing, listed]);
   const pick = async (mode: string) => {
     setBusy(true);
     try {
       const r = await api<{ choice: TailorState | null }>(path(jobId), "PUT", { mode });
-      setOwn((was) => ({ modes: was?.modes ?? list ?? [], choice: r.choice ? { mode: r.choice.mode, state: r.choice.state } : null }));
-      onChange?.(r.choice);
+      const now = r.choice ? { mode: r.choice.mode, state: r.choice.state } : null;
+      if (!listed) setOwn((was) => ({ modes: was?.modes ?? list ?? [], choice: now }));
+      onChange?.(now);
     } catch (e) {
       setOwn((was) => ({ modes: was?.modes ?? list ?? [], choice, error: e instanceof Error ? e.message : "That didn't save." }));
     } finally {

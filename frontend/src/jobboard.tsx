@@ -4,7 +4,7 @@
 import { ExternalLink, FilterX, ListChecks, Plus, Radar, RefreshCw, SearchX, ShieldCheck } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { addManyToQueue, addToQueue, api, frontManyInQueue, moveToFront, type QueueMany } from "./api";
-import { ApplyChoice } from "./applychoice";
+import { ApplyChoice, ApplyChoices } from "./applychoice";
 import { ConfirmQueue, Refused, useSelection } from "./bulk";
 import { useWorkspace } from "./context";
 import { ago, platformName, plural, stamp } from "./format";
@@ -96,6 +96,7 @@ export function BoardView() {
     return () => window.clearTimeout(timer);
   }, [planning, b, reread]);
   const rows = useMemo(() => b?.rows ?? [], [b]);
+  const shown = useMemo(() => rows.map((r) => r.id), [rows]);
   // A whole Select all: the server takes this many in one request (nothing starts until each job's turn).
   const selection = useSelection(5000);
   // What the filters show changed, so what was selected under them no longer means the same rows.
@@ -427,6 +428,7 @@ export function BoardView() {
       </div>
       {board.error && b && <LoadError error={board.error} retry={board.refresh} />}
       <Refused refused={refused} onClose={() => setRefused([])} />
+      <ApplyChoices ids={shown}>
       <Table
         fill
         label="Job board"
@@ -462,6 +464,7 @@ export function BoardView() {
           />
         }
       />
+      </ApplyChoices>
       <ConfirmQueue
         open={asking !== null}
         count={selection.ids.length}

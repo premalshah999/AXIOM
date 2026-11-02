@@ -4,7 +4,7 @@
 import { ExternalLink, ListChecks } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { api, type QueueMany } from "./api";
-import { ApplyChoice } from "./applychoice";
+import { ApplyChoice, ApplyChoices } from "./applychoice";
 import { ConfirmQueue, Refused } from "./bulk";
 import { useWorkspace } from "./context";
 import { ago, platformName, plural, stamp } from "./format";
@@ -30,6 +30,7 @@ export function ReviewView() {
   useEffect(() => setLatest(null), [poll.data]);
   const batch = latest ?? poll.data;
   const rows = useMemo(() => batch?.rows ?? [], [batch]);
+  const shown = useMemo(() => rows.map((r) => r.id), [rows]);
   // Everything starts ticked; only what is unticked is remembered, for this batch.
   const [unticked, setUnticked] = useState<{ id: string; ids: Set<string> }>({ id: "", ids: new Set() });
   const off = unticked.id === batch?.id ? unticked.ids : new Set<string>();
@@ -187,6 +188,7 @@ export function ReviewView() {
       {done && <Refused refused={done.refused} onClose={() => setDone({ ...done, refused: [] })} />}
       {snapshot.control.paused && !!rows.length && <Notice tone="warn">AXIOM is stopped. What you accept waits in the Queue until you press Resume.</Notice>}
       {poll.error && !!batch && <LoadError error={poll.error} retry={poll.refresh} />}
+      <ApplyChoices ids={shown}>
       <Table
         fill
         label="Review batch"
@@ -228,6 +230,7 @@ export function ReviewView() {
           />
         }
       />
+      </ApplyChoices>
       <ConfirmQueue
         open={asking}
         count={n}
