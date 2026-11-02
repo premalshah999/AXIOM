@@ -510,6 +510,19 @@ def test_a_copy_stored_as_different_only_for_its_gaps_is_used_without_another_ca
     assert asyncio.run(pipeline.source_document(service.db, service.config, model, resume))[2] == "import" and not model.calls
 
 
+def test_a_resume_with_a_picture_page_isnt_tailored_as_if_it_were_whole(service):
+    resume = resume_row(service, half_scan_pdf())
+    model = counting()
+    for _ in range(2):  # Read once, and the stored copy says the same without another call.
+        with pytest.raises(pipeline.ResumeUnread) as stopped:
+            asyncio.run(pipeline.source_document(service.db, service.config, model, resume))
+        assert "page 2 of it is a picture" in stopped.value.detail and "Open Resumes" in stopped.value.detail
+    assert len(model.calls) == 1
+    # The person looked and accepts it: their approved copy is what is used.
+    master.approve(service.db, master.current_master(service.db).id, accept_differences=True)
+    assert asyncio.run(pipeline.source_document(service.db, service.config, model, resume))[2] == "master"
+
+
 def test_a_copy_the_person_edited_is_never_buried_by_another_reading(service):
     resume = resume_row(service, text_pdf())
     short = whole_copy()

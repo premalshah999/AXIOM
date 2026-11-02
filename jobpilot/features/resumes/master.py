@@ -98,6 +98,9 @@ def unread_words(exc) -> str:
 def different_words(verification: dict) -> str:
     """What differs between a stored copy and the PDF, in the words a person reads when tailoring stops for it."""
     words = []
+    if pictures := verification.get("picture_pages"):
+        pages = ", ".join(str(n) for n in pictures)
+        words.append(f"{'page' if len(pictures) == 1 else 'pages'} {pages} of it {'is a picture' if len(pictures) == 1 else 'are pictures'}, so AXIOM couldn't read the words there")
     if (verification.get("coverage") or 0) < 0.985:
         missing = ", ".join((verification.get("missing") or [])[:6])
         words.append(f"{int((verification.get('coverage') or 0) * 100)}% of its words came through" + (f", and it is missing {missing}" if missing else ""))
@@ -434,6 +437,11 @@ async def import_master(db, config, model, resume_id: str | None = None) -> dict
     try:
         if pdf:
             verification["source_fill"] = measure_fill(pdf)
+            from pypdf import PdfReader
+
+            # Every word it could read came through, and a whole page of the resume is missing all the same.
+            if pictures := picture_pages(PdfReader(io.BytesIO(pdf))):
+                verification.update(picture_pages=pictures, faithful=False)
     except Exception:  # How full a page looks is a nicety: the copy is already paid for and checked word by word.
         log.info("couldn't measure the source resume's page")
     compiled = await compile_pdf(render(doc, style), timeout=30)

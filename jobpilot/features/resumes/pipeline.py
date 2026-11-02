@@ -174,8 +174,9 @@ async def source_document(db, config, model, resume: dict, *, fresh: bool = Fals
     draft = current_master(db)
     if draft is not None and draft.source_resume_sha == resume["sha"]:
         doc = ResumeDoc.model_validate(draft.doc)
+        stored = draft.verification or {}
         # Checked again: a copy stored before the check stopped counting gaps as differences is usually already right.
-        if (draft.verification or {}).get("faithful") or verify(resume["text"], doc)["faithful"]:
+        if not stored.get("picture_pages") and (stored.get("faithful") or verify(resume["text"], doc)["faithful"]):
             return doc, Style.model_validate(draft.style), "import"
         # A copy the person edited is theirs to approve: another reading would bury it.
         if not fresh or draft.origin == "edited":
