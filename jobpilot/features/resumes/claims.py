@@ -47,6 +47,14 @@ def numbers(text) -> set[str]:
     return {n.replace(",", "").rstrip(".") for n in NUMBER.findall(text or "")}
 
 
+def dropped(candidate: str, source: str) -> list[str]:
+    """Numbers and names the source states that a rewrite lost. Reordering a line's words never needs to take a fact off the page."""
+    have = norm(candidate)
+    names = {m.group(0) for m in NAMED.finditer(source or "")}
+    names |= {m.group(1) for m in re.finditer(r"(?<![.!?:]\s)(?<!^)\b([A-Z][a-z][A-Za-z0-9+#.]*)", source or "")}
+    return sorted(numbers(source) - numbers(candidate)) + sorted({t.rstrip(".") for t in names if norm(t.rstrip(".")) not in have})
+
+
 def check(candidate: str, source: str, vocabulary: str = "", max_growth: float = 1.5) -> list[str]:
     """Return problems; empty means the rewrite is supported by its source."""
     problems = []

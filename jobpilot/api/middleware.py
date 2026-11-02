@@ -1,16 +1,32 @@
 """Request security (sign-in, Origin and content-type rules, response headers) and the error mapping."""
 
+import logging
+import os
 from urllib.parse import urlsplit
 
 from fastapi import Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
+from starlette.exceptions import HTTPException
 
 from ..owner_account import PUBLIC_PATHS
+from ..vocabulary import PROBLEM, plain_error, plain_validation
 from .sessions import COOKIE, RENEW_AFTER, same_secret
 
+logger = logging.getLogger(__name__)
 
-LOOPBACK = {"127.0.0.1", "localhost", "::1", "testserver"}
+
+LOOPBACK = {"127.0.0.1", "localhost", "::1"}
+# The test client's name for itself. It is a plain host name, so a network that answers for it could point a page at this
+# computer (DNS rebinding) and reach the routes that need no sign-in, such as creating the owner account on a fresh install.
+# Only a running test accepts it; pytest sets this variable and an installation never does.
+TEST_HOST = "testserver"
+
+
+def is_test_host(name: str) -> bool:
+    return name == TEST_HOST and "PYTEST_CURRENT_TEST" in os.environ
 
 
 def host_name(value: str) -> str:
@@ -23,15 +39,15 @@ def host_name(value: str) -> str:
 
 def install(app, config, sessions, cache):
     # Only the names this installation is reached by. A web page whose domain was re-pointed at 127.0.0.1 (DNS rebinding) sends
-    # its own domain as Host, so it never matches, whatever the browser believes about the origin. "testserver" is the test
-    # client's name; no browser can be made to send it.
+    # its own domain as Host, so it never matches, whatever the browser believes about the origin.
     served = LOOPBACK | {host_name(urlsplit(config.base_url).netloc)}
 
     @app.middleware("http")
     async def security(request: Request, call_next):
         path = request.url.path
         session = None
-        if host_name(request.headers.get("host", "")) not in served:
+        name = host_name(request.headers.get("host", ""))
+        if name not in served and not is_test_host(name):
             return JSONResponse({"detail": "Open AXIOM at its own address (BASE_URL)."}, status_code=421)
         if path.startswith("/api/"):
             if request.method in {"POST", "PUT", "PATCH", "DELETE"} and request.headers.get("sec-fetch-site", "same-origin") not in {
@@ -88,10 +104,33 @@ def install(app, config, sessions, cache):
             response.headers["Cache-Control"] = "no-store"
         return response
 
+    # What a refusal says goes on a screen as it stands, so these are the one door every error leaves by. A validator's report is a
+    # ValueError too, with its link ("For further information visit https://errors.pydantic.dev/..."), and any library's message
+    # could be next: a sentence the app wrote stands, anything else becomes a plain one.
+    @app.exception_handler(ValidationError)
+    async def invalid_data(_, exc):
+        return JSONResponse({"detail": plain_validation(exc.errors(include_input=False, include_context=False))}, status_code=400)
+
+    @app.exception_handler(RequestValidationError)
+    async def invalid_request(_, exc):
+        return JSONResponse({"detail": plain_validation(exc.errors())}, status_code=422)
+
+    @app.exception_handler(HTTPException)
+    async def refused(_, exc):
+        # Routes hand on str(exc) as the refusal, a validator's report among them.
+        detail = plain_error(exc.detail) if isinstance(exc.detail, str) else exc.detail
+        return JSONResponse({"detail": detail}, status_code=exc.status_code, headers=exc.headers)
+
     @app.exception_handler(ValueError)
     async def invalid(_, exc):
-        return JSONResponse({"detail": str(exc)[:1000]}, status_code=400)
+        return JSONResponse({"detail": plain_error(str(exc)[:1000])}, status_code=400)
 
     @app.exception_handler(RuntimeError)
     async def runtime_error(_, exc):
-        return JSONResponse({"detail": str(exc)[:500]}, status_code=409)
+        return JSONResponse({"detail": plain_error(str(exc)[:500])}, status_code=409)
+
+    @app.exception_handler(Exception)
+    async def unexpected(_, exc):
+        # Whatever nothing else caught: the log keeps it, the screen says something a person can use.
+        logger.exception("Unhandled error in a request", exc_info=exc)
+        return JSONResponse({"detail": PROBLEM}, status_code=500)

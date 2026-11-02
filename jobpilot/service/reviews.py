@@ -6,7 +6,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import aliased
 
 from ..db import Event, Job, MailChallenge, Review, Run, Setting, now
-from ..knowledge import learned_answer
+from ..knowledge import learned_answer, mentions_employer
 from .. import profile_photo
 from ..admission import QueueBlocked, temporary_time, require_intake
 from ..runtime import engine_version
@@ -206,12 +206,7 @@ class ReviewsMixin:
             question_kind = oq.kind(review.question, review.options, context, review.reason)
             shown = oq.tick_options(review.options, context)
             offered = [text for _, text in oq.choices(shown)]
-            if (
-                question_kind == "choice"
-                and answer not in offered
-                and answer not in shown
-                and not oq.free_text_allowed(review.options, context)
-            ):
+            if question_kind == "choice" and not oq.fits_form(answer, review.question, review.options, context):
                 raise ValueError("Choose one of the offered answers")
             if question_kind == "upload" and not document:
                 # Typed text cannot go into a file field; the next attempt would stop on it again.
@@ -270,18 +265,39 @@ class ReviewsMixin:
                     s.add(Setting(key="profile", value=value))
                 if job and saved:
                     scope = saved["scope"]
-                    for other, owner, employer in s.execute(
-                        select(Review, Run, Job)
+                    # The same field on another form, or the same question: the words a person reads and the same choices. The job
+                    # page answers one job's question and Needs you sees only the first 100, so the server clears every other job
+                    # asking. A tick box, a caption under its question and a list reused nowhere else (reusable_answer) stayed asked.
+                    this = oq.same_question(review.question, review.options, context)
+                    # What the answer says ties it too: one naming this employer never goes to the next employer's open question.
+                    tied = (
+                        oq.employer_only(review.question, review.options)
+                        or mentions_employer(review.question, job.company or "")
+                        or mentions_employer(answer, job.company or "")
+                    )
+                    # Columns only for the run and the job: a whole run row decodes its packet (~320 KB), here for every open question.
+                    for other, owner_id, company in s.execute(
+                        select(Review, Run.id, Job.company)
                         .join(Run, Review.run_id == Run.id)
                         .join(Job, Run.job_id == Job.id)
                         .where(
-                            Review.key == review.key,
                             Review.answer.is_(None),
                             Review.id != review.id,
                             Run.state.in_(["waiting_answer", "needs_review"]),
                             Job.status != "archived",
                         )
                     ):
+                        same_words = oq.same_question(other.question, other.options, other.context or {}) == this
+                        if other.key != review.key and (
+                            not same_words
+                            or question_kind == "upload"
+                            or other.key in {"manual", "session"}
+                            or other.key.startswith("repair:")
+                            or review.key.startswith("repair:")
+                            or oq.unread(other.question, other.reason)
+                            or oq.kind(other.question, other.options, other.context or {}, other.reason) != question_kind
+                        ):
+                            continue
                         if row_scoped and (
                             other.run_id == review.run_id
                             or (other.context or {}).get("history_identity") != context.get("history_identity")
@@ -294,14 +310,10 @@ class ReviewsMixin:
                             # that row's date (4fe4eac6, run 6d2635b1, 2026-10). An answer with no row names no row, and
                             # a bare date caption is never carried to another form's field.
                             continue
-                        fits = answer in oq.tick_options(other.options, other.context) or oq.free_text_allowed(
-                    other.options, other.context
-                )
-                        if fits and (
-                            scope == "personal" or employer.company.casefold() == job.company.casefold()
-                        ):
+                        fits = oq.fits_form(answer, other.question, other.options, other.context)
+                        if fits and (scope == "personal" or company.casefold() == job.company.casefold() or (same_words and not tied)):
                             other.answer = answer
-                            enqueue(s, "fact_resume", other.id, {"review_id": other.id}, run_id=owner.id)
+                            enqueue(s, "fact_resume", other.id, {"review_id": other.id}, run_id=owner_id)
         message = (
             "Saved. I'll attach this file whenever an application asks for it."
             if question_kind == "upload"

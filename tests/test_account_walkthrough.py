@@ -124,6 +124,9 @@ class FakeInbox:
     def live(self, challenge):
         return bool(challenge)
 
+    async def kept_reset(self, *_a):
+        return None  # No earlier attempt left a reset mail behind.
+
     async def arm(self, run_id, job, email, kind, **_k):
         self.armed.append(kind)
         return {"id": "c1", "since": 0}

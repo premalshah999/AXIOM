@@ -1,6 +1,7 @@
 """Authenticated job board routes; manual application clicks use normal queue protections."""
 
 import asyncio
+import logging
 import re
 from datetime import UTC, datetime, timedelta
 from typing import Literal
@@ -111,8 +112,9 @@ def source_from_link(text):
     if "://" not in link:
         link = "https://" + link
     parts = urlsplit(link)
-    if parts.scheme not in {"http", "https"} or not parts.hostname:
-        raise ValueError("Paste the link to a company's job board")
+    # Words with spaces, or a word with no dot in it, are not an address: it used to be saved as a board named after itself.
+    if parts.scheme not in {"http", "https"} or not parts.hostname or "." not in parts.hostname or re.search(r"\s", link):
+        raise ValueError("That isn't a web link. Paste the link to the company's list of jobs, starting with https://.")
     name, _ = employer_of(link)  # a shared platform with no company in the link is refused here
     kind = BOARD_KINDS.get(detect(link).id, "career_page")
     path = [part for part in parts.path.split("/") if part]
@@ -155,7 +157,21 @@ def router(service) -> APIRouter:
             if (cached := settings()) is not config:
                 connections.apply(cached)
             apply_daily_limit(db, config.daily_application_limit)
-        return {**await start_autonomous(service, data.target), "runtime": batch_snapshot(service)}
+        answer = {**await start_autonomous(service, data.target), "runtime": batch_snapshot(service)}
+
+        def lists_follow():
+            """Queue, Job board and Best matches read the start at once: the line is what the dispatcher now starts by itself."""
+            from ...board_view import board
+            from ...queue_order import plans
+
+            plans(service).now(service)
+            board(service).stale()
+
+        try:
+            await asyncio.to_thread(lists_follow)
+        except Exception:  # The batch has started. The lists catch up on their next poll.
+            logging.getLogger(__name__).exception("The lists could not follow a start")
+        return answer
 
     @r.get("/api/startable")
     def startable():
@@ -170,15 +186,21 @@ def router(service) -> APIRouter:
         return {**shown, "startable": value["startable"] + asked, "ready": value["ready"] + asked}
 
     @r.get("/api/board")
-    def job_board_page(
+    async def job_board_page(
         q: str = "", role: str = "all", company: str = "all", place: str = "all", posted: str = "all", platform: str = "all",
         fit: Literal["match", "other", "all"] = "match", sort: Literal["fit", "newest", "company"] = "fit", page: int = 1, size: int = 25,
         level: str = "all", group: bool = True, want: Literal["page", "rows", "ids"] = "page", section: Literal["main", "sites"] = "main",
     ):
-        """The Job board (board_view.py): one page of open postings, filters with exact counts. A `def` route: it reads on a worker thread."""
-        from ...board_view import page as board_page
+        """The Job board (board_view.py): one page of open postings, filters with exact counts. It reads on a worker thread."""
+        from ...board_view import companies_to_warm, page as board_page, warm_logos
 
-        return board_page(service, q[:200], role[:200], company[:200], place[:40], posted[:4], platform[:40], fit, sort, page, size, level[:20], group, want, section)
+        answer = await asyncio.to_thread(
+            board_page, service, q[:200], role[:200], company[:200], place[:40], posted[:4], platform[:40], fit, sort, page, size, level[:20], group, want, section
+        )
+        if want == "page" and not answer.get("planning"):
+            # The icons of the next pages too, so they are there when someone scrolls to them (a background lookup, polite: one company's own pages).
+            warm_logos(service, companies_to_warm(service))
+        return answer
 
     @r.get("/api/job-board")
     def snapshot(
@@ -247,6 +269,16 @@ def router(service) -> APIRouter:
     def update(data: BoardSettings):
         # The goal is the daily limit (Settings › Limits); this form no longer carries a second number.
         data = data.model_copy(update={"batch_target": config.daily_application_limit})
+        # "How close a match" is on this form and on Profile › Job preferences: one number, shown twice. Profile → board is
+        # synced when the profile is saved (routes/profile.py); this is the way back, so neither screen keeps an old value. A new
+        # install has no profile yet: it starts with this number, or the first profile save would put the default back.
+        if settings(db).minimum_auto_fit != data.minimum_auto_fit:
+            with db.exclusive() as s:
+                row = s.get(Setting, "profile")
+                if row:
+                    row.value = {**row.value, "minimum_fit": data.minimum_auto_fit}
+                else:
+                    s.add(Setting(key="profile", value={"minimum_fit": data.minimum_auto_fit}))
         if data.auto_apply:
             from ...autopilot import start_batch
 
@@ -290,10 +322,13 @@ def router(service) -> APIRouter:
     @r.post("/api/job-board/sources/link")
     async def add_source_by_link(data: SourceLink):
         """Add a company's job board from a link alone: its name, kind and board address are read from the link."""
+        from ...link_intake import URL_REFUSALS
+
         try:
             name, kind, url = source_from_link(data.url)
+            await public_url(url, config.allow_private_urls)
         except ValueError as exc:
-            raise HTTPException(422, str(exc)) from exc
+            raise HTTPException(422, URL_REFUSALS.get(str(exc), str(exc))) from exc
         added = await add_source(SourceInput(name=name, kind=kind, url=url))
         return {**added, "name": name, "kind": kind, "url": url}
 

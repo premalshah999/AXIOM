@@ -13,6 +13,7 @@ import pytest
 
 from jobpilot import widgets
 from jobpilot.answers.history import major_equivalent
+from support_budget import scaled
 
 HTML = (Path(__file__).parent / "fixtures" / "workday_prompt.html").read_text()
 DEFAULT_TAXONOMY = ["Accounting", "Actuarial Science", "Computer and Information Science", "Computer Engineering",
@@ -49,7 +50,7 @@ async def test_the_catalog_decides_and_only_its_exact_name_is_searched(page, cat
     assert committed == expected
     assert await pills(page) == [expected]
     assert await page.evaluate("window.SEARCHES") == [expected]
-    assert time.monotonic() - started < 3
+    assert time.monotonic() - started < scaled(3)
 
 
 async def test_a_catalog_without_an_acceptable_major_fails_without_touching_the_field(page):

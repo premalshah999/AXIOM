@@ -4,6 +4,7 @@ import { useId, useState, type ReactNode } from "react";
 import "./styles/setup.css";
 import { api } from "./api";
 import { useAction } from "./hooks";
+import { useUnsaved } from "./shell/unsaved";
 import { Button, ConfirmButton } from "./ui/index";
 
 /** On a page, one column of labelled rows divided by hairlines; in a drawer, stacked fields. */
@@ -42,6 +43,8 @@ export function SaveBar({
   note?: ReactNode;
   disabled?: boolean;
 }) {
+  // Once Save is pressed nothing is left to lose: moving on while it finishes needs no question.
+  useUnsaved(dirty && !saving);
   // Nothing to save, nothing to show: the toast already said "saved".
   if (!dirty && !saving) return null;
   return (

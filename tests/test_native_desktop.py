@@ -357,7 +357,7 @@ def holding(profile):
     profile.mkdir(parents=True, exist_ok=True)
     process = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)", f"--user-data-dir={profile}"])
     os.symlink(f"somehost-{process.pid}", profile / "SingletonLock")
-    deadline = time.monotonic() + 5
+    deadline = time.monotonic() + 30  # until the command line is visible; a loaded Mac starts a Python slowly
     while time.monotonic() < deadline and f"--user-data-dir={profile}" not in subprocess.run(
         ["ps", "-o", "command=", "-p", str(process.pid)], capture_output=True, text=True
     ).stdout:
@@ -760,3 +760,7 @@ def test_discovery_is_never_limited_to_one_board_at_a_time(layout):
     layout.env_file.write_text(mine)
     desktop.ensure_config(layout)
     assert layout.env_file.read_text() == mine
+
+
+def test_the_mac_app_requires_the_windows_session_to_create_the_account(layout):
+    assert desktop.environment(layout)["SIGNUP_NEEDS_SESSION"] == "true"

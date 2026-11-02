@@ -17,6 +17,7 @@ from jobpilot.answers import Resolver
 from jobpilot.browser import BrowserEngine
 from jobpilot.forms import FormSession
 from jobpilot.schemas import Profile
+from support_budget import stretch_playwright_ceilings
 
 ASHBY_BANNER = {
     "type": "explicit_rejection_page",
@@ -45,6 +46,16 @@ class FastAsyncio:
 
 
 WORKDAY_URL = "https://acme.wd1.myworkdayjobs.com/en-US/ext/job/x/Analyst_1"
+
+
+@pytest.fixture(autouse=True)
+def the_look_at_the_page_finishes(monkeypatch):
+    """The app bounds its one look after a commit at 3 s, and a look that runs out is doubt, never a confirmation. These tests
+    read what the look decided, so it gets to finish: beside nine workers it ran out and returned None, which failed the test of
+    a real receipt (2026-11-01) and would have passed the test that a stale receipt is refused without reading the page. The pages here
+    are static, so their reads stretch with the load too."""
+    monkeypatch.setattr(browser, "POST_COMMIT_LOOK_SECONDS", 30)
+    stretch_playwright_ceilings(monkeypatch)
 
 
 async def serve(page, url, body):

@@ -250,7 +250,7 @@
   white-space: nowrap;
 }
 .bd-when small {
-  max-width: 190px;
+  max-width: 150px;
   overflow: hidden;
   color: var(--ink-3);
   font-size: var(--text-meta);
@@ -281,6 +281,32 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
+}
+/* How a job is applied to, in a row: it keeps its width, or the table squeezes it to an empty box. */
+.ax-act .tl-choice.is-compact {
+  flex: none;
+  flex-wrap: nowrap;
+}
+.ax-act .tl-choice.is-compact .tl-choice-pick {
+  flex: none;
+  width: 88px;
+}
+.ax-act .tl-choice.is-compact .ax-control {
+  height: 28px;
+  min-height: 28px;
+  padding-block: 0;
+  font-size: var(--text-meta);
+}
+.bd-group {
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+  font-weight: 400;
+}
+/* Below this the pinned actions would sit over Status: the row's date goes first, and it stays on the job's panel. */
+@container ax-table (max-width: 1099px) {
+  .ax-table .is-hide-1100 {
+    display: none;
+  }
 }
 @container ax-table (max-width: 599px) {
   .bd-job {
@@ -372,4 +398,28 @@
   padding: 0 var(--space-2);
   color: var(--ink-2);
   font-size: var(--text-meta);
+}
+
+/* What a job in line waits on: the whole sentence in its column, and under the job where the column doesn't fit. */
+.qu-wait {
+  display: block;
+  white-space: normal;
+  color: var(--ink-3);
+  font-size: 0.8125rem;
+  line-height: 1.35;
+}
+.qu-wait-small {
+  display: none;
+}
+@media (max-width: 860px) {
+  .qu-wait-small {
+    display: block;
+    flex-basis: 100%;
+    white-space: normal;
+  }
+}
+.qu-asks {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 12px;
 }

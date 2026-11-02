@@ -275,8 +275,9 @@ def fresh_code():
     return f"{secrets.randbelow(900000) + 100000}"
 
 
-def deliver(box, platform, kind, *, to=ME, code=None, link=None, other=False, **extra):
-    """One real-format message into the fake mailbox. Returns what it carries (the code or the link)."""
+def deliver(box, platform, kind, *, to=ME, code=None, link=None, other=False, from_=None, **extra):
+    """One real-format message into the fake mailbox. Returns what it carries (the code or the link). `from_` replaces the
+    sender: mail from a domain the platform and the employer's name do not give away."""
     spec = PLATFORMS[platform]
     employer, site = spec["company"], spec["site"]
     if other:
@@ -286,6 +287,7 @@ def deliver(box, platform, kind, *, to=ME, code=None, link=None, other=False, **
         body = o.get("code_body", "<p>Your verification code is <b>{code}</b>.</p>")
     else:
         sender, subject, body = spec[kind]
+    sender = from_ or sender
     if kind == "code":
         code = code or fresh_code()
         inner, text = body.format(code=code), f"Your verification code is {code}"

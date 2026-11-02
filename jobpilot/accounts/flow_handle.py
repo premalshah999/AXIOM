@@ -15,10 +15,39 @@ from .pages import PASSWORD_MAXIMUM
 from .pages import REQUIRED_INPUT
 from .pages import login_identifier
 from .pages import registration_state
+from .credentials import account_host_allowed
 from .tenants import account_tenant
+from .tenants import outside_sign_in
 
 
 class FlowHandleMixin:
+    def refused_sign_in(self, url, obs):
+        """The result that ends this pass when `url` isn't a sign-in the saved password may be typed into, else None. The owner's rule: no
+        application is made with third-party logins (social_login_only). The model pressed "Sign in using LinkedIn" on a posting
+        (2026-11-02) and the saved password was then typed into LinkedIn's own login, three times over two runs."""
+        e = self.e
+        job = getattr(e, "job", None) or {}
+        ats = getattr(getattr(e, "fallback_mail_adapter", None), "id", "") or job.get("ats", "")
+        given = (job.get("url"), getattr(self.store, "job_url", ""), getattr(e, "application_entry_url", ""),
+                 getattr(e, "landing_url", ""), getattr(e, "listing_url", ""))
+        config = getattr(getattr(e, "service", None), "config", None)
+        if account_host_allowed(ats, url, given, company=job.get("company") or "", allow_private=bool(getattr(config, "allow_private_urls", False))):
+            return None
+        host = urlsplit(url).hostname or "a page with no address"
+        kind = outside_sign_in(host)
+        getattr(e, "emit", lambda *a, **k: None)("account_outside", "No password was typed on this sign-in", {"host": host, "kind": kind})
+        if kind == "assessment":
+            from ..adapters.base import assessment_login_result
+
+            return assessment_login_result(obs.get("text", ""))
+        if kind == "identity":
+            reason = f"The page led to a third-party login ({host}), and no password is typed there; nothing was sent"
+        elif urlsplit(url).scheme != "https" and account_host_allowed(ats, url, given, company=job.get("company") or "", allow_private=True):
+            reason = f"The sign-in on {host} isn't encrypted (plain http), and no password is typed there; nothing was sent"
+        else:
+            reason = f"The page led to a sign-in on {host}, which isn't this employer's or its application platform's, and no password is typed there; nothing was sent"
+        return {"state": "waiting_browser", "reason": reason, "blocker_type": "control_failure", "recovery_cause": "control_observation"}
+
     async def handle(self):
         from ..agent_settings import enabled
 
@@ -50,10 +79,20 @@ class FlowHandleMixin:
         ]
         if not passwords:
             return await self.open_create_account_form(obs) or await self.open_sign_in_gate(obs)
+        if getattr(e.form, "on_questionnaire", lambda: False)():
+            # A sign-in on the vendor a launcher opened is not the employer's. GreatAmerica's "Take Assessment" led to the Predictive Index's
+            # login (2026-11-01): the applicant's email and shared password were posted to it on four runs. Nothing is typed there.
+            from ..adapters.base import assessment_login_result
+
+            e.result = assessment_login_result(obs.get("text", ""))
+            return True
         frame = e.form.frames[passwords[0]["id"]]
         if any(e.form.frames[f["id"]] != frame for f in passwords):
             raise AccountActionError("Account password fields span different frames", "observation_failure")
         account_url = frame.url
+        if stop := self.refused_sign_in(account_url, obs):
+            e.result = stop
+            return True
         creating = len(passwords) > 1 or any(f.get("autocomplete") == "new-password" for f in passwords)
         # TikTok: "Create Account" page with one password and no new-password hint was treated as
         # sign-in, so its "Create" button made the action ambiguous and no credentials were sent.
@@ -358,6 +397,10 @@ class FlowHandleMixin:
         # A privacy acknowledgement may replace account inputs. Fill credentials
         # on the resulting controls, so the account action cannot send empty replacements.
         obs = await e.form.scan()
+        # Filling the form above can move the frame; the frame is checked again at the moment its password is typed.
+        if stop := self.refused_sign_in(frame.url, obs):
+            e.result = stop
+            return True
         for f in obs["fields"]:
             if e.form.frames[f["id"]] != frame:
                 continue

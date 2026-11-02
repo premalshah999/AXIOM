@@ -3,10 +3,12 @@
 import re
 from urllib.parse import urlsplit
 import hashlib
+from ..ats import platform_host
 from ..db import Setting
 from ..inbox import host_matches
 from .store import AccountStore
 from .tenants import AUTH_HOSTS
+from .tenants import outside_sign_in
 from .tenants import registrable
 
 
@@ -95,20 +97,61 @@ class Accounts:
 
     def password_allowed(self, ats, frame_url, job_url):
         """Type the shared password only on the employer's site or its ATS's own auth hosts."""
-        frame = (urlsplit(frame_url).hostname or "").lower()
-        job = (urlsplit(job_url).hostname or "").lower()
-        if urlsplit(frame_url).scheme != "https" and not self.config.allow_private_urls:
-            return False
-        if frame == job or registrable(frame) == registrable(job):
-            return True
-        name = registrable(frame).split(".")[0]
-        if len(name) >= 4 and name == registrable(job).split(".")[0]:
-            # The employer's own name under another domain: Amazon's amazon.jobs signs candidates in on
-            # atozpublic.idprism-auth.amazon.com, where its reset code was refused as "an unexpected website" (2026-10-27).
-            return True
-        if host_matches(job, AUTH_HOSTS.get(ats, [])) and employer_domain_of_tenant(job, frame):
-            return True
-        return host_matches(frame, AUTH_HOSTS.get(ats, []))
+        return password_host_allowed(ats, frame_url, job_url, allow_private=self.config.allow_private_urls)
+
+
+def password_host_allowed(ats, frame_url, job_url, *, allow_private=False):
+    """The employer's site or `ats`'s own auth hosts. Never an identity provider or an assessment vendor, even one on the job's own domain
+    (an Apple posting's idmsa.apple.com), and never over plain HTTP."""
+    frame = (urlsplit(frame_url).hostname or "").lower()
+    job = (urlsplit(job_url).hostname or "").lower()
+    if urlsplit(frame_url).scheme != "https" and not allow_private:
+        return False
+    if not frame or outside_sign_in(frame):
+        return False
+    if frame == job or registrable(frame) == registrable(job):
+        return True
+    name = registrable(frame).split(".")[0]
+    if len(name) >= 4 and name == registrable(job).split(".")[0]:
+        # The employer's own name under another domain: Amazon's amazon.jobs signs candidates in on
+        # atozpublic.idprism-auth.amazon.com, where its reset code was refused as "an unexpected website" (2026-10-27).
+        return True
+    if host_matches(job, AUTH_HOSTS.get(ats, [])) and employer_domain_of_tenant(job, frame):
+        return True
+    return host_matches(frame, AUTH_HOSTS.get(ats, []))
+
+
+def account_host_allowed(ats, frame_url, own_urls, *, company="", allow_private=False):
+    """Whether the account flow may type a saved password here: an allow-rule, because a list of what to refuse never ends. The account
+    flow runs on any site a page led to, so this asks more than `password_host_allowed` does of an adapter on its own platform: the
+    employer's site by any address this job was given, a platform the registry names (a career site hands off to any of them), or a
+    host carrying the employer's own name. `own_urls`: the addresses this job was given or opened at, never ones it walked to."""
+    frame = (urlsplit(frame_url).hostname or "").lower()
+    own = [str(url) for url in own_urls or () if url]
+    if any(password_host_allowed(ats, frame_url, url, allow_private=allow_private) for url in own):
+        return True
+    if urlsplit(frame_url).scheme != "https" and not allow_private:
+        return False
+    if not frame or outside_sign_in(frame):
+        return False
+    if platform_host(frame) or any(host_matches(frame, hosts) for hosts in AUTH_HOSTS.values()):
+        return True
+    hosts = [(urlsplit(url).hostname or "").lower() for url in own]
+    return employer_named_host(frame, company) or any(platform_host(job) and employer_domain_of_tenant(job, frame) for job in hosts)
+
+
+# What an employer's own career site adds to its name: acmecareers.com, careers-acme.com, workatacme.com.
+CAREER_WORDS = re.compile(r"careers?|jobs?|talent|recruit(?:ing|ment)?|hiring|apply|workat|joinus|join")
+
+
+def employer_named_host(frame_host, company):
+    """The host's own domain is the employer's name, alone or with a career site's words: a job board's link led on to the employer. A word
+    in common is not its name ("Hire" is not hireright.com)."""
+    from ..knowledge import employer_variants
+
+    label = re.sub(r"[^a-z0-9]", "", registrable(frame_host).split(".")[0].lower())
+    names = {re.sub(r"[^a-z0-9]", "", name.lower()) for name in employer_variants(company)}
+    return bool(label) and bool(names & {label, CAREER_WORDS.sub("", label)})
 
 
 def employer_domain_of_tenant(job_host, frame_host):

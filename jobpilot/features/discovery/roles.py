@@ -113,12 +113,47 @@ def related_role(title, roles):
     return None
 
 
+# Words that say how senior a role is, or are nouns every engineering field shares: a role made only of them ("Graduate Engineer", "New
+# Grad Engineer") names no field, so on its own it matched Process, Controls, Geotechnical and Silicon Photonics Engineers (36 and 99 of
+# 1,186 open postings on a software and data profile, 2026-11-02).
+LEVEL_WORDS = frozenset({
+    "graduate", "graduates", "grad", "new", "entry", "level", "early", "career", "university", "college", "recent", "junior", "associate",
+    "senior", "mid", "intern", "internship",
+})
+GENERIC_NOUNS = frozenset({"engineer", "engineers", "scientist", "analyst", "specialist", "professional"})
+# Teaching posts and machine-shop programming share a title word with software roles and are neither ("CNC Machinist - Programmer",
+# "Professor of Data Science").
+NOT_TECH = re.compile(r"\bcnc\b|machinist|\bprofessor\b|\badjunct\b|\blecturer\b", re.I)
+
+
+def level_only(role):
+    """Whether a target role names a level and no field."""
+    named = set(words(role))
+    return bool(named) and named <= LEVEL_WORDS | GENERIC_NOUNS
+
+
+def field_roles(roles):
+    """The roles that decide a title: a level is not a field, so when the profile names a field too, level-only roles add nothing."""
+    roles = list(roles or ())
+    return [role for role in roles if not level_only(role)] or roles
+
+
+def fitting_roles(title, roles):
+    """Every target role a title fits (see role_fits), in the profile's order: the job board's role filter."""
+    if NOT_TECH.search(str(title or "")):
+        return []
+    return [role for role in field_roles(roles) if matching_role(title, [role]) or related_role(title, [role])]
+
+
 def role_fits(title, roles):
     """Whether a title is one of the profile's roles or a specialisation of its family: the one question every stage asks.
     Discovery admitted "Cloud Engineer" through related_role, the ranker scored it 64-68 Ready, and the autopilot's and the
     queue's own check (matching_role alone) refused it: 7 Ready jobs, 6 never tried, sat as "outside the target roles"
     (2026-11-01)."""
-    return bool(matching_role(title, roles) or related_role(title, roles))
+    if NOT_TECH.search(str(title or "")):
+        return False
+    fields = field_roles(roles)
+    return bool(matching_role(title, fields) or related_role(title, fields))
 
 
 def search_terms(roles, limit=6):

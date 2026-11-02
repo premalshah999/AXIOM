@@ -8,7 +8,7 @@ import { useWorkspace } from "./context";
 import { useAction } from "./hooks";
 import { appliedState } from "./model";
 import type { ApplyManyResult, ApplyOutcome } from "./types";
-import { plural, shortId } from "./format";
+import { plainReason, plural, shortId } from "./format";
 import { Button, Dialog, Panel } from "./ui/index";
 import { StatusPill } from "./worktools";
 
@@ -65,7 +65,7 @@ const OUTCOME_LABEL: Record<ApplyOutcome, string> = {
   waiting: "waiting to start",
   preparing: "preparing a resume",
   already: "already running or applied",
-  refused: "not applied",
+  refused: "not applying",
 };
 
 function summarize(summary: ApplyManyResult["summary"]) {
@@ -91,7 +91,7 @@ export function useApplyMany() {
           }),
         (r) =>
           r
-            ? `Applied to ${plural(r.results.length, "job")}: ${summarize(r.summary)}.`
+            ? `Applying to ${plural(r.results.length, "job")}: ${summarize(r.summary)}.`
             : undefined,
       );
       if (answer) {
@@ -127,6 +127,7 @@ const WAITS_FOR: Record<string, string> = {
   provider_unavailable: "the model provider",
   deployment_hold: "the deployment hold to end",
   company_limit: "the employer limit",
+  daily_limit: "today's limit to reset",
 };
 
 // What happened to the last "Apply to selected": refusals one by one (they need a look), waits summed up by what
@@ -153,17 +154,17 @@ export function ApplyOutcomes({
         <button type="button" className="ax-link" onClick={() => openJob(r.job_id)}>
           {r.company || r.title ? `${r.company || "Employer"} · ${r.title || ""}` : shortId(r.job_id)}
         </button>
-        {r.message && <small>{r.message}</small>}
+        {r.message && <small>{plainReason(r.message)}</small>}
       </span>
       <StatusPill
         state={r.outcome === "refused" ? "failed" : r.outcome === "already" ? r.state : appliedState(r.outcome)}
-        label={r.outcome === "refused" ? "Not applied" : undefined}
+        label={r.outcome === "refused" ? "Not applying" : undefined}
       />
     </li>
   );
   return (
     <Panel
-      title={`Applied to ${plural(result.results.length, "job")}`}
+      title={`Applying to ${plural(result.results.length, "job")}`}
       actions={
         <>
           <span className="ax-note">{summarize(result.summary)}</span>
@@ -177,7 +178,7 @@ export function ApplyOutcomes({
         {waits.size > 0 && (
           <p className="ax-note">
             {[...waits].map(([what, n]) => `${n} wait for ${what}`).join(" · ")}. They start on their own; follow them in
-            Pipeline.
+            the Queue.
           </p>
         )}
         {refused.length > 0 && (
@@ -198,7 +199,7 @@ export function ApplyOutcomes({
 
 // Said before anything joins the line, because each of these becomes a real application to a real employer. With sending off the
 // jobs would only wait, so that is said too, with the way to turn it on in the same press.
-export function ConfirmQueue({ open, count, onClose, onConfirm, title, warning }: { open: boolean; count: number; onClose: () => void; onConfirm: () => void; title?: string; warning?: string }) {
+export function ConfirmQueue({ open, count, onClose, onConfirm, title, warning, confirmLabel }: { open: boolean; count: number; onClose: () => void; onConfirm: () => void; title?: string; warning?: string; confirmLabel?: string }) {
   const { snapshot, refresh } = useWorkspace();
   const { pending, run } = useAction();
   const sending = snapshot.control.auto_submit;
@@ -222,7 +223,7 @@ export function ConfirmQueue({ open, count, onClose, onConfirm, title, warning }
           </Button>
           {sending ? (
             <Button variant="primary" onClick={onConfirm}>
-              {`Queue ${noun}`}
+              {confirmLabel ?? `Queue ${noun}`}
             </Button>
           ) : (
             <>
@@ -254,7 +255,7 @@ export function Refused({ refused, onClose }: { refused: QueueMany["refused"]; o
         <button type="button" className="ax-link" onClick={() => openJob(r.job_id)}>
           {r.company || r.title ? `${r.company || "Employer"} · ${r.title || ""}` : shortId(r.job_id)}
         </button>
-        <small>{r.reason}</small>
+        <small>{plainReason(r.reason)}</small>
       </span>
     </li>
   );

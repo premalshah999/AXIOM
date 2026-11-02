@@ -1,6 +1,6 @@
 # AXIOM Beta Terms of Use
 
-Version 2026-11-01-beta
+Version 2026-11-02-beta
 
 AXIOM is a free, non-commercial beta. It has not been finished and it will make mistakes. Please read this before you use it. By ticking the box in the app you agree to these terms. If you don't agree, don't use AXIOM, and delete it.
 

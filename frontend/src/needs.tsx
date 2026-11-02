@@ -2,10 +2,10 @@
 // pane on the right answers one thing, and Enter moves to the next. The same question on several jobs is one entry, and supervisors
 // and references are one entry with a card per past job. What no answer can complete, and what has no question at all, look different.
 import { ArrowLeft, Check, CircleSlash, FileText, MessageCircleQuestion, ShieldCheck, Users, Video } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKey } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKey } from "react";
 import { api, applyJob } from "./api";
 import { useWorkspace } from "./context";
-import { ago, employerOf, jobWords, plural } from "./format";
+import { ago, employerOf, jobWords, plainReason, plural } from "./format";
 import { useAction, useDraft, usePoll } from "./hooks";
 import { HistoryList } from "./history";
 import { OverLimitJobs } from "./overlimit";
@@ -351,6 +351,9 @@ export function NeedsView() {
   const [selected, setSelected] = useState(route.filter === "over" || route.filter === "reserved" || route.filter === "unconfirmed" ? "decide:" + route.filter : "");
   const [opened, setOpened] = useState(selected !== "");
   const [said, setSaid] = useState("");
+  const [ticked, setTicked] = useState<ReadonlySet<string>>(() => new Set());
+  const bulk = useAction();
+  const { refresh } = useWorkspace();
   const pane = useRef<HTMLDivElement>(null);
   // Progress is what really left the list, by whichever way: answered here, dropped, or settled by the server from another answer.
   const seen = useRef<number | null>(null);
@@ -387,6 +390,53 @@ export function NeedsView() {
     wantFocus.current = !matchMedia("(pointer: coarse)").matches;
   }, []);
   const order = open.map((e) => e.id);
+  // Several at once: what they share is leaving the list. Every answer stays a person's own, one question at a time.
+  const pickable = open;
+  const pickedRows = pickable.filter((e) => ticked.has(e.id));
+  const allPicked = pickable.length > 0 && pickedRows.length === pickable.length;
+  const toggle = useCallback((id: string) => setTicked((was) => {
+    const next = new Set(was);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    return next;
+  }), []);
+  const pickedJobs = [...new Map(pickedRows.flatMap((e) => [...e.reach.frees, ...e.reach.helps]).filter((x) => !!x.job).map((x) => [x.job!.id, x.job!])).values()];
+  const skipPicked = () => {
+    setSkipped((list) => [...new Set([...list, ...pickedRows.map((e) => e.id)])]);
+    if (current && ticked.has(current.id)) setSelected(order.find((id) => !ticked.has(id)) ?? "");
+    setTicked(new Set());
+  };
+  const dropPicked = () =>
+    bulk.run(
+      "drop",
+      async () => {
+        const ids = pickedJobs.map((j) => j.id);
+        let dropped = 0;
+        for (let i = 0; i < ids.length; i += 4) {
+          const done = await Promise.allSettled(ids.slice(i, i + 4).map((id) => api("/jobs/" + id, "DELETE")));
+          dropped += done.filter((d) => d.status === "fulfilled").length;
+        }
+        setSkipped((list) => list.filter((x) => !ticked.has(x)));
+        setTicked(new Set());
+        await refresh();
+        return dropped;
+      },
+      (dropped) => `Dropped ${plural(dropped ?? 0, "job")}. Nothing was sent to ${(dropped ?? 0) === 1 ? "the employer" : "those employers"}.`,
+    );
+  // An application with nothing to answer can only be tried again: the server's one-click path decides each.
+  const retryPicked = () =>
+    bulk.run(
+      "retry",
+      async () => {
+        const ids = pickedJobs.map((j) => j.id);
+        const results: { outcome: string }[] = [];
+        for (let i = 0; i < ids.length; i += 50) results.push(...(await api<{ results: { outcome: string }[] }>("/jobs/apply-many", "POST", { job_ids: ids.slice(i, i + 50) })).results);
+        setTicked(new Set());
+        await refresh();
+        return { started: results.filter((r) => !["already", "refused"].includes(r.outcome)).length, not: results.filter((r) => ["already", "refused"].includes(r.outcome)).length };
+      },
+      (r) => r && `Started ${plural(r.started, "job")} again.${r.not ? ` ${plural(r.not, "job")} didn't start: open ${r.not === 1 ? "it" : "them"} to see why.` : ""}`,
+    );
   const advance = (from: string) => {
     const at = order.indexOf(from);
     const next = order[at + 1] ?? order[at - 1] ?? "";
@@ -494,6 +544,34 @@ export function NeedsView() {
                 <i style={{ width: total ? `${(100 * done) / total}%` : 0 }} />
               </div>
             </div>
+            {pickable.length > 0 && (
+              <div className="nd-bulk" role="status">
+                <label className="ax-check">
+                  <input
+                    type="checkbox"
+                    checked={allPicked}
+                    ref={(el) => {
+                      if (el) el.indeterminate = !allPicked && pickedRows.length > 0;
+                    }}
+                    onChange={() => setTicked(allPicked ? new Set() : new Set(pickable.map((e) => e.id)))}
+                  />
+                  <span>{pickedRows.length ? `${pickedRows.length.toLocaleString()} selected` : `Select all ${pickable.length.toLocaleString()}`}</span>
+                </label>
+                {pickedRows.length > 0 && (
+                  <>
+                    <Button size="sm" variant="ghost" disabled={bulk.pending !== null} onClick={skipPicked}>
+                      Skip
+                    </Button>
+                    {pickedRows.every((e) => e.type === "none") && (
+                      <ConfirmButton label="Try again" confirm="Yes, try again" note={`AXIOM sends a real application to each, in its turn. One already sent is never sent twice.`} variant="secondary" size="sm" pending={bulk.pending === "retry"} onConfirm={retryPicked} />
+                    )}
+                    {pickedJobs.length > 0 && (
+                      <ConfirmButton label={`Drop ${plural(pickedJobs.length, "job")}`} confirm="Yes, drop them" note="They leave your lists. Nothing is sent to the employers." size="sm" pending={bulk.pending === "drop"} onConfirm={dropPicked} />
+                    )}
+                  </>
+                )}
+              </div>
+            )}
             <div className="nd-scroll" onKeyDown={listKeys}>
               {sections.map(
                 (s) =>
@@ -505,7 +583,12 @@ export function NeedsView() {
                         </h2>
                       )}
                       {s.items.map((e) => (
-                        <InboxRow key={e.id} entry={e} questions={inbox.peopleQuestions} current={e.id === currentId && !phone} onPick={() => pick(e.id)} />
+                        <div key={e.id} className="nd-rowline">
+                          <label className="nd-pick">
+                            <input type="checkbox" aria-label={`Select ${e.type === "none" ? e.who : e.title}`} checked={ticked.has(e.id)} onChange={() => toggle(e.id)} />
+                          </label>
+                          <InboxRow entry={e} questions={inbox.peopleQuestions} current={e.id === currentId && !phone} onPick={pick} />
+                        </div>
                       ))}
                     </section>
                   ),
@@ -524,7 +607,7 @@ export function NeedsView() {
                     Skipped <span>{parked.length}</span>
                   </summary>
                   {parked.map((e) => (
-                    <InboxRow key={e.id} entry={e} questions={inbox.peopleQuestions} current={e.id === currentId && !phone} onPick={() => pick(e.id)} />
+                    <InboxRow key={e.id} entry={e} questions={inbox.peopleQuestions} current={e.id === currentId && !phone} onPick={pick} />
                   ))}
                 </details>
               )}
@@ -626,7 +709,7 @@ export function NeedsView() {
 }
 
 // ---------- a row of the list ----------
-function InboxRow({ entry: e, questions, current, onPick }: { entry: Entry; questions: number; current: boolean; onPick: () => void }) {
+const InboxRow = memo(function InboxRow({ entry: e, questions, current, onPick }: { entry: Entry; questions: number; current: boolean; onPick: (id: string) => void }) {
   const frees = e.reach.frees.length;
   const asksVideo = e.type === "blocked" && !!e.group && blockOf(e.group.review)?.hard;
   const sub =
@@ -634,7 +717,7 @@ function InboxRow({ entry: e, questions, current, onPick }: { entry: Entry; ques
       ? `${plural(questions, "question")} on ${plural(frees + e.reach.helps.length, "application")}`
       : [e.who, e.since && e.type !== "none" && ago(e.since)].filter(Boolean).join(" · ");
   return (
-    <button type="button" className={"nd-row is-" + e.type} aria-current={current || undefined} data-entry={e.id} onClick={onPick}>
+    <button type="button" className={"nd-row is-" + e.type} aria-current={current || undefined} data-entry={e.id} onClick={() => onPick(e.id)}>
       <span className="nd-row-mono">
         {e.type === "people" ? (
           <span className="ax-mono nd-people-mono" aria-hidden="true">
@@ -655,7 +738,7 @@ function InboxRow({ entry: e, questions, current, onPick }: { entry: Entry; ques
       </span>
     </button>
   );
-}
+});
 
 // ---------- the pane's parts ----------
 /** Who is asking: the first thing in the pane, each one opening its job. */
@@ -741,7 +824,7 @@ function NothingPane({ entry: e, onGone, onSkip }: { entry: Entry; onGone: () =>
   const { refresh, openJob, snapshot } = useWorkspace();
   const { pending, run } = useAction();
   const job = e.job;
-  const reason = (e.run?.reason || "").replace(/\s*\((?:field\s+)?f\d-[^)]*\)/g, "");
+  const reason = plainReason(e.run?.reason);
   // Waiting for an answer with none open: every question has one, and it hasn't started again.
   const answered = e.run?.state === "waiting_answer";
   return (

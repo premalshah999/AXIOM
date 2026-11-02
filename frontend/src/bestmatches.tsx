@@ -1,7 +1,7 @@
 // Overview's Best matches (owner, 2026-11-01: "on the dashboard, maybe make a list of most matched applications"): the board's top fits
 // not yet applied to, with the one thing to do about each. The same rows as the Job board's first page, so a job reads the same on both.
 import { Plus } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { addToQueue, api } from "./api";
 import { useWorkspace } from "./context";
 import { useRowActions, usePoll } from "./hooks";
@@ -17,6 +17,14 @@ export function BestMatches() {
   const list = usePoll<BoardPage>((signal) => api(`/board?fit=match&sort=fit&group=1&size=${SHOWN}&want=rows`, "GET", undefined, signal), 60000, [version]);
   const [asked, setAsked] = useState<ReadonlySet<string>>(() => new Set());
   const rows = list.data?.rows ?? [];
+  // The first read after a launch is still being prepared: a 60 second poll left the panel on a skeleton for a minute.
+  const planning = !!list.data?.planning;
+  const reread = list.refresh;
+  useEffect(() => {
+    if (!planning) return;
+    const timer = window.setTimeout(reread, 1500);
+    return () => window.clearTimeout(timer);
+  }, [planning, reread, list.data]);
   const reviewing = snapshot.config.apply_mode !== "auto";
   const queue = async (r: BoardRow) => {
     setAsked((s) => new Set(s).add(r.id));
@@ -79,7 +87,7 @@ export function BestMatches() {
                 <span className="ov-match-why" title={r.line}>
                   {r.line}
                 </span>
-                <span className="ov-match-fit mono" title="How well it fits your profile, out of 100">
+                <span className="ov-match-fit mono" title="How close a match for your profile, out of 100">
                   {r.score ?? "–"}
                 </span>
               </button>

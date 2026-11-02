@@ -6,8 +6,8 @@
     Name 16 pt, section headings 10.5, sub-headings 10, bullets 9, dates in italics: read from the compiled PDF, not the LaTeX.
     Nothing the applicant hasn't confirmed reaches the PDF: an unconfirmed draft's title or bullets are a failure wherever they appear.
 
-Projects, which the owner's "never remove" doesn't name: a source project stays, with its own bullet count, unless the applicant removed it
-themselves on the review screen (`removed_projects`). A confirmed project joins the section; it never replaces one by itself.
+Projects, which the owner's "never remove" doesn't name: a source project stays, with its own bullet count, unless it's in `removed_projects`: the
+applicant removed it on the review screen, or an Aggressive draft of the same size takes its place until they switch back. A project never drops out by itself.
 
 A page overflow is a warning and never a failure: the rules forbid dropping content to fit, so the app says so plainly instead.
 """

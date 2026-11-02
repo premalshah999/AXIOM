@@ -1,6 +1,6 @@
 # AXIOM Beta Privacy Policy
 
-Version 2026-11-01-beta
+Version 2026-11-02-beta
 
 AXIOM is a free, non-commercial beta that runs on your own Mac. The people who make it don't run a server for your data, and don't receive your profile, resume, applications, mail or keys. There are no accounts with us, no analytics and no advertising.
 
@@ -17,13 +17,16 @@ AXIOM only works by sending data to other services. Each has its own privacy pol
 | Goes to | What | When |
 |---|---|---|
 | **Employers and hiring platforms** | Your name, contact details, resume, answers, demographic answers you saved, and the account details used on their site | When applying. Their handling is up to them |
-| **Your AI provider** (for example OpenRouter and the model hosts it uses) | Job postings, your profile and resume text, form questions and draft answers. This can include sensitive answers you saved | When ranking jobs and filling forms, using your own key |
+| **Your AI provider** (for example OpenRouter and the model hosts it uses) | Job postings, your profile and resume text, form questions and draft answers, and pictures of application pages with password and code fields covered. This can include sensitive answers you saved | When ranking jobs and filling forms, using your own key |
 | **Your email provider** (Gmail) | AXIOM signs in to your mailbox with your app password and reads messages relevant to applications: employer codes, links, receipts and replies. Message content used for this stays on your Mac | When verifying and confirming applications |
 | **A CAPTCHA solving service** | The challenge and the page address, not your profile | Only if one is set up and a site presents a check |
 | **Telegram** | Notifications and questions, which can include employer names and your answers | Only if you connect it |
 | **Google's icon service** | A company's web address, to find its logo. Nothing about you | When showing logos, unless turned off in settings |
 | **GitHub** | A check for a newer version | Occasionally |
 | **Job boards and public job lists** | Requests for postings. Nothing about you | When searching for jobs |
+| **Search engines** (DuckDuckGo and Bing, and Google through Serper if you add its key) | Searches made from the roles and places you chose. Not your name or contact details | When searching for jobs |
+| **TypeSafe** | Form questions and their choices, to help answer them | Only if you add its key |
+| **Google's Chrome download** | A request to download Chrome. Nothing about you | Only on a Mac without Chrome |
 
 Normal internet details, such as your IP address, are visible to these services when AXIOM connects.
 
@@ -39,7 +42,7 @@ If you enter references, supervisors or other people's details, you're responsib
 
 Data stays on your Mac until it's removed. AXIOM deletes old jobs it never applied to and old logs on a schedule, and keeps a record of applications that were sent. You can delete everything in Settings, or by deleting the app and its folder.
 
-This can't remove what's already been sent: applications and accounts held by employers and hiring platforms, and data your AI, email or other providers hold. To remove those, contact each of them directly.
+This can't remove what's already been sent: applications and accounts held by employers and hiring platforms, and data your AI, email or other providers hold. To remove those, contact each of them directly. It also can't remove copies outside AXIOM, such as a Time Machine backup of your Mac or a database copy you saved to another folder.
 
 ## Your rights
 

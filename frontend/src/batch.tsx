@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { api } from "./api";
 import { useWorkspace } from "./context";
-import { useAction, useNow, usePoll } from "./hooks";
+import { useAction, useNotify, useNow, usePoll } from "./hooks";
 import { ConsentWords } from "./permissions";
 import { DayChart, DotPatterns } from "./identity/DayChart";
 import { LiveWork, type LiveRow } from "./identity/LiveWork";
@@ -14,15 +14,18 @@ import { appliedState, evidenceLabel, STATES, type JobRow } from "./model";
 import { HeldEmployers } from "./heldemployers";
 import { OPEN_JOB_LINK } from "./jobintake";
 import { groupQuestions, QuestionCard, type QuestionGroup } from "./questions";
-import type { ApplicationWorkers, MailStatus, RuntimeHealth, Snapshot, Startable, Success } from "./types";
+import type { ApplicationWorkers, MailStatus, RuntimeHealth, Startable, Success } from "./types";
 import { ago, day, employerOf, jobWords, plural, urlRole } from "./format";
 import { Button, Dialog, Empty, Monogram, MonogramStack, Panel, Skeleton } from "./ui/index";
 import { BestMatches } from "./bestmatches";
 import { Notice } from "./worktools";
+import { whyLine, WhyAction, WhyAsks } from "./whywaiting";
 import { pressResume, pressStop } from "./shell/StopControl";
 import "./styles/work.css";
 
 const LIVE_MAIL = new Set(["pending", "matched", "consumed"]);
+// The server's limit on Applications per day (config.py, daily_application_limit).
+const MAX_DAILY_LIMIT = 1000;
 
 type Working = {
   key: string;
@@ -137,8 +140,8 @@ function useWorking(mail: MailStatus | null, workers?: ApplicationWorkers) {
     working: Math.max(runtimeWorkers ? new Set(assignments.map((a) => a.run_id).filter(Boolean)).size : 0, owners.length),
     emailWaits,
     waiting: {
-      queued: counts.states.queued ?? 0,
-      starting: counts.states["pending:waiting"] ?? 0,
+      // The same number Queue's Up next shows, whichever way each job got in line.
+      inLine: snapshot.waiting?.in_line ?? (counts.states.queued ?? 0) + (counts.states["pending:waiting"] ?? 0),
       repairing: counts.states.waiting_browser ?? 0,
       email: counts.states.waiting_email ?? emailWaits.length,
     },
@@ -150,6 +153,7 @@ type WorkingState = ReturnType<typeof useWorking>;
 function Hero({ work, applications, models }: { work: WorkingState; applications: Success[] | null; models?: RuntimeHealth["models"] }) {
   const { snapshot, counts, link, refresh, go, version } = useWorkspace();
   const { pending, run } = useAction();
+  const notify = useNotify();
   const now = useNow();
   const today = useMemo(() => confirmedToday(applications || [], now), [applications, now]);
 
@@ -165,9 +169,12 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
   const goal = typed ?? limit;
   const setGoal = (value: number) => setTyped(value);
   const saveLimit = (raw: number) => {
-    const value = Math.max(1, Math.min(500, Math.round(raw || limit)));
+    // Empty, zero or below: the field goes back to what is saved. Above the most: it says so.
+    const value = raw >= 1 ? Math.min(MAX_DAILY_LIMIT, Math.round(raw)) : limit;
     if (value === limit) {
       setTyped(null);
+      if (raw > MAX_DAILY_LIMIT) notify("error", `${MAX_DAILY_LIMIT} a day is the most AXIOM allows.`);
+      else if (!(raw >= 1)) notify("error", `Applications per day is a number from 1 to ${MAX_DAILY_LIMIT}. It stays at ${limit}.`);
       return Promise.resolve();
     }
     return run(
@@ -177,7 +184,9 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
         await refresh();
         setTyped(null);
       },
-      `Applications per day: ${value}. Settings shows the same number.`,
+      raw > MAX_DAILY_LIMIT
+        ? `Applications per day: ${value}, the most AXIOM allows. Settings shows the same number.`
+        : `Applications per day: ${value}. Settings shows the same number.`,
     );
   };
   const workers = snapshot.config.workers_enabled;
@@ -190,7 +199,6 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
   const paused = snapshot.control.paused;
   const panel = panelState(snapshot, link.lost);
   const ready = usePoll<Startable>((signal) => api("/startable", "GET", undefined, signal), 30000, [version]);
-  const stopped = paused || (!rt.intake_enabled && rt.intake_reason === "Paused");
   const n = work.working;
   const reviewing = snapshot.config.apply_mode !== "auto";
 
@@ -206,7 +214,10 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
       ? ["info", `Applying to ${plural(n, "job")} right now`]
       : ["info", "Not applying", work.limit ? (reviewing ? "Review a batch to choose what goes next, or press Start to let AXIOM choose." : "Press Start to apply until a target you choose.") : undefined],
   };
-  const [tone, sentence, sub] = said[panel];
+  // Why nothing is starting, from the server's one answer (jobpilot/waiting.py). A broken connection or a stop says itself above.
+  const why = snapshot.waiting?.reason;
+  const [tone, sentence, sub]: ["info" | "bad", string, string?] =
+    why && !["lost", "restart", "paused"].includes(panel) ? ["info", n ? `Applying to ${plural(n, "job")} right now` : why.title, whyLine(why)] : said[panel];
 
   const begin = (value: number, permissions?: "allow" | "decline") =>
     run(
@@ -258,12 +269,18 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
       </span>
     </label>
   );
-  const key = !workers ? null : !active ? (
+  // A stop comes first: Start can't lift it (the server refuses), and the key that can is Resume.
+  const key = !workers ? null : paused ? (
+    <div className="ov-key">
+      <MasterKey word="Resume" icon="start" aria-label="Resume applying" busy={pending === "start"} disabled={pending !== null} onClick={resume} />
+      <p className="ov-key-note">Picks up where it left off.</p>
+    </div>
+  ) : !active ? (
     <form
       className="ov-key"
       onSubmit={(e) => {
         e.preventDefault();
-        const value = Math.max(1, Math.min(500, Math.round(goal || limit)));
+        const value = Math.max(1, Math.min(MAX_DAILY_LIMIT, Math.round(goal || limit)));
         // A batch sends on its own, which turns "Let me review first" off. Said before it happens, not found out afterwards.
         if (!snapshot.control.auto_submit || reviewing || !permitted) setConfirmStart(value);
         else begin(value);
@@ -272,11 +289,6 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
       <MasterKey type="submit" word="Start" icon="start" aria-label="Start applying" busy={pending === "start"} disabled={pending !== null || noResume || noKey} />
       {dailyLimit}
     </form>
-  ) : stopped ? (
-    <div className="ov-key">
-      <MasterKey word="Resume" icon="start" aria-label="Resume applying" busy={pending === "start"} disabled={pending !== null} onClick={paused ? resume : () => begin(target)} />
-      <p className="ov-key-note">Picks up where it left off.</p>
-    </div>
   ) : panel === "restart" ? (
     <div className="ov-key">
       <MasterKey word="Restart" icon="start" aria-label="Restart automation" busy={pending === "start"} disabled={pending !== null} onClick={() => begin(target)} />
@@ -397,7 +409,7 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
             </>
           }
         >
-          {reviewing ? "You review each batch before anything is queued. Starting this switches to applying automatically" : "You chose not to send yet. Starting this turns sending on"}: AXIOM will find jobs and send each application once
+          {reviewing ? "You review each batch before anything is queued. Starting this switches to applying automatically" : snapshot.control.auto_submit ? "Starting this keeps applying automatically" : "You chose not to send yet. Starting this turns sending on"}: AXIOM will find jobs and send each application once
           every required answer is checked, without asking you first. To keep control, press Not yet{reviewing ? " and review a batch." : " and pick jobs yourself on the Job board."}
           {!permitted && (
             <>
@@ -423,6 +435,8 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
         </Notice>
       )}
       <ProviderNotice models={models} go={go} />
+      {!!snapshot.waiting?.battery && <Notice tone="warn">{snapshot.waiting.battery}</Notice>}
+      {!!snapshot.waiting?.slow && <Notice tone="info">{snapshot.waiting.slow}</Notice>}
       {!workers && (
         <Notice tone="warn">Applying is disabled in this installation's configuration, so applying can't run. Enable workers on the server and restart.</Notice>
       )}
@@ -539,7 +553,13 @@ function Live({ work, checking }: { work: WorkingState; checking: boolean }) {
 
   // Only what is there, each opening its list. Questions have their own panel.
   const { waiting } = work;
-  const tally = (count: number, label: string, to?: { view?: "ledger"; tab: string; filter?: string }): ReactNode =>
+  const why = snapshot.waiting?.reason;
+  const ask = snapshot.waiting?.ask;
+  // Regular workers are all busy and the rest show idle: a specialist and the company-site worker never take a regular new job.
+  const lanes = rt.application_workers;
+  const regularFull = !!lanes?.pools?.normal && lanes.pools.normal.available <= 0;
+  const kept = regularFull && lanes ? (lanes.specialist_workers ?? 0) + (lanes.custom_workers ?? 0) : 0;
+  const tally = (count: number, label: string, to?: { view?: "ledger" | "queue"; tab?: string; filter?: string }): ReactNode =>
     count > 0 ? (
       to ? (
         <button type="button" className="ov-foot-link" onClick={() => go({ view: "jobs", ...to })}>
@@ -552,11 +572,19 @@ function Live({ work, checking }: { work: WorkingState; checking: boolean }) {
       )
     ) : null;
   const foot = [
-    tally(waiting.queued + waiting.starting, "queued", { tab: "pipeline", filter: "active" }),
+    tally(waiting.inLine, "in line", { view: "queue" }),
     // Every failure number opens the one list of what went wrong (Applications, What went wrong; jobpilot/problems.py).
     tally(waiting.repairing, "being fixed", { view: "ledger", tab: "problems" }),
     active ? tally(rt.blocked ?? 0, "blocked since you pressed Start", { view: "ledger", tab: "problems" }) : null,
     active ? tally(rt.failed ?? 0, "not sent since you pressed Start", { view: "ledger", tab: "problems" }) : null,
+    // With work under way, what the idle workers are waiting on, and the ones no regular job can use.
+    why && rows.length ? <span>{why.says}</span> : null,
+    kept ? <span>{kept} kept for company sites and hard retries</span> : null,
+    ask ? (
+      <span>
+        {ask.says} <WhyAsks ask={ask} className="ov-foot-link is-act" />
+      </span>
+    ) : null,
   ].filter(Boolean);
   return (
     <LiveWork
@@ -565,7 +593,17 @@ function Live({ work, checking }: { work: WorkingState; checking: boolean }) {
       busy={work.busy.length}
       limit={work.limit}
       checking={checking}
-      empty={panel === "running" ? <Idle said={ready.data} fallback={empty.running} go={go} /> : empty[panel]}
+      empty={
+        why && why.code !== "stopped" && why.code !== "nothing_ready" && !["lost", "restart", "paused"].includes(panel) ? (
+          <>
+            {whyLine(why)} <WhyAction reason={why} className="ov-foot-link is-act" />
+          </>
+        ) : panel === "running" ? (
+          <Idle said={ready.data} fallback={empty.running} go={go} />
+        ) : (
+          empty[panel]
+        )
+      }
       foot={foot.length ? foot.map((item, i) => <span key={i}>{item}</span>) : undefined}
     />
   );
@@ -759,17 +797,17 @@ function FirstRun({ mail }: { mail: MailStatus | null }) {
     {
       done: p.target_roles.length > 0,
       title: "What to look for",
-      detail: p.target_roles.length ? `${p.target_roles.join(", ")} · ${p.target_locations.join(", ") || "Anywhere in the USA"}` : "Choose the roles discovery searches for.",
+      detail: p.target_roles.length ? `${p.target_roles.join(", ")} · ${p.target_locations.join(", ") || "Anywhere in the USA"}` : "Choose the roles AXIOM looks for.",
       action: "Adjust",
       onClick: () => go({ view: "profile", tab: "experience", filter: "preferences" }),
     },
     {
       done: submitting,
-      title: "Send applications automatically",
+      title: "Send applications",
       detail: submitting ? "Applications send once every required answer is checked." : "Off: nothing is sent to employers until you turn this on.",
       action: submitting ? "Settings" : pending === "submit-on" ? "Turning on…" : "Turn on",
       onClick: submitting
-        ? () => go({ view: "settings", tab: "system" })
+        ? () => go({ view: "settings", tab: "applying" })
         : () =>
             run(
               "submit-on",
@@ -777,7 +815,7 @@ function FirstRun({ mail }: { mail: MailStatus | null }) {
                 await api("/control", "PUT", { auto_submit: true });
                 await refresh();
               },
-              "Automatic submission turned on.",
+              "AXIOM will send applications.",
             ),
     },
     {

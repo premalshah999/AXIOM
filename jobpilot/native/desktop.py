@@ -10,6 +10,7 @@ resident. It only uses the standard library, because it runs before anything els
 """
 
 import fcntl
+import http.client
 import json
 import os
 import platform
@@ -31,7 +32,7 @@ from pathlib import Path
 
 from . import pg, release
 from .env import ROOT, NativeError, load, prepare
-from .supervisor import port_in_use, process_start, read_state, stop_chrome_holding, stop_leftovers, supervisor_alive
+from .supervisor import disk_full, port_in_use, process_start, read_state, stop_chrome_holding, stop_leftovers, supervisor_alive
 
 BUNDLE_ID = "app.axiom.desktop"
 # What a checkout install uses by default, and what production holds on this Mac. An app beside a checkout never takes them.
@@ -131,9 +132,13 @@ def write_private(path, text):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
-    with os.fdopen(fd, "w") as f:
-        f.write(text)
-    os.replace(temporary, path)
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+        os.replace(temporary, path)
+    except OSError:
+        Path(temporary).unlink(missing_ok=True)  # A full disk: no half file left behind, one for each try.
+        raise
 
 
 def read_json(path):
@@ -337,6 +342,8 @@ def environment(layout, ports=None, chrome=""):
         # Otherwise the working directory comes first on sys.path. Started from a checkout's folder, this imported that
         # checkout's `jobpilot` instead of its own (2026-10-31, on the first launch beside production).
         "PYTHONSAFEPATH": "1",
+        # The window signs in with the access token before it shows anything (desktop/AXIOM.m): nobody else may create the account.
+        "SIGNUP_NEEDS_SESSION": "true",
         # The bundled OpenSSLs were built to read /opt/homebrew/etc/openssl@3/openssl.cnf. On a Mac with Homebrew that would be
         # someone else's config inside the app's TLS; on one without, a failed read at every start (the clean-run trace, 2026-10-31).
         "OPENSSL_CONF": str(layout.resources / "openssl.cnf"),
@@ -424,7 +431,10 @@ def boot(layout, owner=None):
     layout.logs.mkdir(parents=True, exist_ok=True, mode=0o700)
 
     def report(step, message, percent=None):
-        write_private(layout.progress_file, json.dumps({"step": step, "message": message, "percent": percent}))
+        try:
+            write_private(layout.progress_file, json.dumps({"step": step, "message": message, "percent": percent}))
+        except OSError:
+            pass  # A full disk. The window then looks at the disk itself (showFailure), and this must not hide the real failure.
 
     try:
         return _boot(layout, owner, report)
@@ -440,6 +450,8 @@ def boot(layout, owner=None):
 
 def _boot(layout, owner, report):
     report("preparing", "Getting things ready ...")
+    if disk_full(layout.home):
+        raise NativeError("This Mac's disk is full, so AXIOM cannot start. Your work is safe. Free some space, then try again.")
     # Held until the supervisor exits, across exec: a second copy of the app must neither pick other ports nor rewrite
     # the window's file under the first.
     lock = os.open(layout.native / "boot.lock", os.O_RDWR | os.O_CREAT, 0o600)
@@ -522,11 +534,14 @@ def scrub(text, home=""):
     """Safe to paste into a message: no keys, no email addresses, no phone numbers, no page addresses past the site's name,
     no folder names of the person's Mac. What this cannot know is whether a sentence is private, so callers keep to logs of
     AXIOM's own (never mail, never answers) and say what is left in."""
+    from ..redaction import redact
+
     out = []
     for line in str(text).splitlines():
         if SECRET_WORDS.search(line):
             out.append("[a line that mentions a key or password was left out]")
             continue
+        line = redact(line, loose=True)
         if home:
             line = line.replace(home, "~")
         line = re.sub(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+", "[email]", line)
@@ -584,7 +599,8 @@ def diagnostics(layout, database=None):
         lines.append(f"Applications in progress: {state.get('active') if state.get('active') is not None else 'unknown'}")
     power = state.get("power")
     if isinstance(power, dict):
-        lines.append(f"Power: {'battery' if power.get('battery') else 'plugged in'}, {power.get('percent', '?')}%")
+        # A Mac with no battery reports no percentage.
+        lines.append(f"Power: {'battery' if power.get('battery') else 'plugged in'}" + (f", {power['percent']}%" if power.get("percent") is not None else ""))
     for name, child in (state.get("children") or {}).items():
         extra = f", restarted {child['restarts']}x" if child.get("restarts") else ""
         lines.append(f"  {name}: {child.get('state')}{extra} {scrub(child.get('message') or '', home)}".rstrip())
@@ -635,7 +651,7 @@ def check_update(layout, fetch=None):
     except urllib.error.HTTPError as exc:
         answer["error"] = "" if exc.code == 404 else f"The release page answered {exc.code}."  # 404: nothing published yet.
         return answer
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, http.client.HTTPException) as exc:
         answer["error"] = f"Could not reach github.com ({type(exc).__name__})."
         return answer
     latest = str(release.get("tag_name") or "").lstrip("vV") if isinstance(release, dict) else ""
@@ -692,12 +708,31 @@ def existing_environment(layout):
     return environment(layout, ports, read_json(layout.window_file).get("chrome", ""))
 
 
+def remember_secrets(cfg):
+    """A short-lived process has opened nothing, so a password with no tell-tale shape would pass `scrub`: the installation's own
+    settings and the keys saved in the app are registered first. Best effort: diagnostics are wanted most when things are broken."""
+    from ..redaction import register
+
+    register(value for name, value in cfg.values.items() if re.search(r"key|token|passw|secret|login", name, re.I) and isinstance(value, str))
+    try:
+        from .. import connections
+
+        register(value for name, value in connections.stored(cfg).items() if connections.kind(name) == "secret")
+    except Exception:
+        pass
+    try:
+        register([(cfg.data_dir / "access-token").read_text().strip()])
+    except OSError:
+        pass
+
+
 def print_diagnostics(layout):
     """Works with AXIOM stopped or broken, which is when it is wanted: the database is asked only if it answers."""
     database = None
     try:
         os.environ.update(existing_environment(layout))
         cfg = prepare(load())
+        remember_secrets(cfg)
         if port_in_use(cfg.pg_port):
             database = lambda sql: pg.psql(layout.pg_bin, cfg, sql, timeout=5, check=False)  # noqa: E731
     except (NativeError, OSError, ValueError):

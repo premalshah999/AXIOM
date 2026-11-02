@@ -19,12 +19,12 @@ def test_run_detail_has_the_run_its_events_and_the_failure_report(client, servic
     (folder / "answers.json").write_text('{"first_name": "Alex"}')
     (folder / "final.png").write_bytes(b"\x89PNG\r\n")
     body = client.get(f"/api/runs/{run_id}").json()
-    assert set(body) == {"run", "events", "answers", "screenshot", "demo_receipt", "failure_report"}
+    assert set(body) == {"run", "events", "activity", "answers", "screenshot", "demo_receipt", "failure_report"}
     assert body["run"]["id"] == run_id and "packet" not in body["run"]
     assert [e["message"] for e in body["events"]] == ["Opened the form"]
     assert body["answers"] == {"first_name": "Alex"}
     assert body["screenshot"] is True and body["demo_receipt"] is None
-    assert body["failure_report"] == {"summary": "Posting closed"}
+    assert body["failure_report"] == {"summary": "Posting closed.", "likely_cause": "", "next_steps": []}
 
 
 def test_run_detail_of_an_unknown_run_is_404(client):

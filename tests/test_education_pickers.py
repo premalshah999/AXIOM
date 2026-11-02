@@ -15,6 +15,7 @@ import pytest
 from jobpilot import widgets
 from jobpilot.answers import Resolver
 from jobpilot.schemas import Profile
+from support_budget import scaled
 
 HTML = (Path(__file__).parent / "fixtures" / "workday_prompt.html").read_text()
 PROFILE = {
@@ -49,7 +50,7 @@ async def test_the_pages_list_in_the_tenants_wording_decides_without_probe_searc
     assert await form.fill(field, "Marine Biology") == "Computer and Information Science"
     # Only the chosen name was searched: the recorded major and its first word were never probed.
     assert await page.evaluate("window.SEARCHES") == ["Computer and Information Science"]
-    assert time.monotonic() - started < 4
+    assert time.monotonic() - started < scaled(4)
 
 
 async def test_a_prompt_returns_inside_its_deadline_and_closes_its_popup(page):
@@ -59,7 +60,7 @@ async def test_a_prompt_returns_inside_its_deadline_and_closes_its_popup(page):
     started = time.monotonic()
     with pytest.raises(ValueError):
         await widgets.prompt(page.main_frame, container, "Data Science", deadline=time.monotonic() + 4)
-    assert time.monotonic() - started < 6
+    assert time.monotonic() - started < scaled(6)
     assert await page.locator("#popup").is_hidden()
     assert await pills(page) == []
 

@@ -168,9 +168,9 @@ class MailboxesMixin:
             raise ValueError(
                 "Gmail didn't accept this. Check the address, then make a new app password with the steps above and paste it here."
             ) from None
-        except Exception as exc:
+        except Exception:
             raise ValueError(
-                f"Could not reach Gmail ({type(exc).__name__}). Try again in a minute."
+                "Could not reach Gmail. Try again in a minute."
             ) from None
         sealed = self.vault.seal({"provider": "gmail_imap", "address": email, "app_password": password})
         with self.db.exclusive() as s:

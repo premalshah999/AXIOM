@@ -127,8 +127,25 @@ function useJobActions(row: JobRow, detailed = false) {
       submitted ? "Confirmed as submitted." : "Marked not sent.",
     );
 
+  const restore = () =>
+    run(
+      "restore",
+      async () => {
+        const r = await api<ControlResult>(`/jobs/${row.job.id}/restore`, "POST");
+        settle();
+        return r;
+      },
+      (r) => r?.message,
+    );
+
   const acts: Act[] = [];
   const needs = stateInfo(state).group === "needs";
+  // A removed job does nothing but come back, and the server keeps one that may have reached the employer where it is.
+  if (row.job.status === "archived") {
+    if (run_?.state && COMMITTED.has(run_.state)) return { acts, busy: pending !== null, pending, protectedNote: false };
+    acts.push({ id: "restore", label: "Restore", tone: "primary", run: restore });
+    return { acts, busy: pending !== null, pending, protectedNote: false };
+  }
   if (run_?.state === "submission_unknown")
     acts.push(
       { id: "confirm", label: "Confirm as submitted", tone: "primary", run: () => verdict(true) },
@@ -154,7 +171,7 @@ function useJobActions(row: JobRow, detailed = false) {
       tone: "danger",
       confirm: committed
         ? "Hide this job? A sent application is not withdrawn."
-        : "Delete this job? It leaves the pipeline and board. History is kept.",
+        : "Delete this job? It leaves your lists, and its history is kept.",
       confirmLabel: committed ? "Hide it" : "Delete",
       run: () => control("delete"),
     });
@@ -207,7 +224,7 @@ function useStartActions(row: JobRow, started: boolean, place?: { position: numb
   const { pending, run } = useAction();
   const job = row.job;
   const ready = job.status === "ready";
-  if (started || row.state === "job:paused" || row.state === "pending:waiting" || row.state === "reserved" || snapshot.resumes.length === 0)
+  if (started || job.status === "archived" || row.state === "job:paused" || row.state === "pending:waiting" || row.state === "reserved" || snapshot.resumes.length === 0)
     return { acts: [] as Act[], pending };
   // A job the posting itself rules out: the queue would only refuse it when its turn came.
   const ruledOut = /^(?:an )?explicit hiring restriction/i.test(job.reason || "");
@@ -263,7 +280,8 @@ export function DrawerActions({ row, started, asking, place, hold }: { row: JobR
   const start = useStartActions(row, started, place, hold);
   const busy = base.busy || start.pending !== null;
   const pending = base.pending ?? start.pending;
-  const all = [...start.acts, ...base.acts];
+  // First in line already: "Move to the front" would do nothing.
+  const all = [...start.acts, ...base.acts].filter((a) => !(a.id === "front" && place?.position === 1));
   const danger = all.filter((a) => a.tone === "danger");
   const normal = all.filter((a) => a.tone !== "danger");
   const lead = normal.find((a) => a.tone === "primary") ?? (asking ? undefined : normal[0]);

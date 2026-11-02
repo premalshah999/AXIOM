@@ -211,7 +211,7 @@ def confirmed_since(session, started_at):
 def batch_snapshot(service):
     """Authoritative distinct-job progress, never a count of retry attempts."""
     from .db import JobListing
-    from .jobboard import us_location, within_window
+    from .jobboard import unconfirmed, us_location, within_window
     from .pipeline_comparison import snapshot as worker_snapshot
 
     db, cfg = service.db, settings(service.db)
@@ -280,8 +280,7 @@ def batch_snapshot(service):
                     Job.status != "archived",
                     within_window(cfg, at),
                     JobListing.posted_at <= at.isoformat(),
-                    JobListing.last_seen
-                    >= (at - timedelta(hours=max(6, cfg.interval_hours * 2 + 1))).isoformat(),
+                    ~unconfirmed(at, cfg.interval_hours),
                 )
             )
         )
@@ -325,6 +324,13 @@ def batch_snapshot(service):
             select(func.count()).select_from(Source).where(Source.enabled.is_(True), Source.next_run <= now())
         )
     state = batch.get("state", "idle")
+    from .waiting import finished_today
+
+    # What the screens read: the batch is only saved work. With Review a batch chosen in Settings it starts nothing, and read "Waiting to
+    # start, Paused" with a Resume that turned automatic applying back on without the Start dialog. Yesterday's reached goal is over:
+    # it read "Press Start tomorrow" every day after, beside "0 of 25".
+    if (state == "active" and not cfg.auto_apply) or (state == "complete" and not finished_today(batch, service.config)):
+        state = "idle"
     intake = bool(
         state == "active"
         and cfg.enabled
@@ -843,6 +849,12 @@ async def owner_requests_only(service):
         # Each pool is scheduled on its own: a full normal pool must not stop a company-site request (due() skips a full lane's jobs).
         room = pool_capacity(s, NORMAL, service.config.topology).available
         room += pool_capacity(s, CUSTOM, service.config.topology).available
+        # The batch's own sum (tick): with today's limit used up a start would fill in a whole form, then be refused at the last step,
+        # spending the job's start and the person's AI credit on an application that can't go out.
+        from .waiting import sent_today
+
+        active = s.scalar(select(func.count()).select_from(Run).where(Run.state.in_(ACTIVE)))
+        room = min(room, service.config.daily_application_limit - sent_today(s, service.config) - active)
     return await due(service, room)
 
 

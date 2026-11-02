@@ -251,6 +251,10 @@ def unknown_resubmit_allowed(session, runs, at=None, *, checked=True):
         (r.receipt or {}).get("email_confirmed") or (r.receipt or {}).get("website_confirmed") for r in runs
     ):
         return False
+    if any((r.receipt or {}).get("other_posting") for r in runs):
+        return False  # An application reached another of the employer's postings: a second send is never the answer.
+    if any((r.receipt or {}).get("type") == "possible_send" for r in runs):
+        return False  # Sent with nothing armed, and no one has read the page after it (browser.settle_possible_send): only a reading clears it.
     if len(unknown) > int(policy.get("max_resubmits", 2)):
         return False
     # A post-submit screenshot that shows the employer's confirmation means the
@@ -284,6 +288,25 @@ def unknown_resubmit_allowed(session, runs, at=None, *, checked=True):
         search.value.get("run_id") == getattr(last, "id", None)
         and finished + wait <= searched
         and now - searched <= RECEIPT_CHECK_VALID
+    )
+
+
+def receipt_page_seen(session, runs, job_url):
+    """An earlier run of this job stood on the employer's own receipt address for this posting (browser.received_application_page), whatever
+    state it ended in. Humana (2026-11-02) sits in "waiting_browser": its run reopened that page, walked on to Workday's sign-in and stopped
+    there, so its saved route no longer shows it and a retry would start from the posting. The record of the visit outlives the route."""
+    from .browser import received_application_page
+
+    ids = [r.id for r in runs]
+    if not ids:
+        return False
+    return any(
+        received_application_page(url, job_url)
+        for url in session.scalars(
+            select(Event.data["url"].as_string()).where(
+                Event.run_id.in_(ids), Event.kind.in_(("browser", "step")), Event.data["url"].as_string().ilike("%thank%you%")
+            )
+        )
     )
 
 

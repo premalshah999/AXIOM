@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { api, ApiError } from "./api";
 import { useWorkspace } from "./context";
 import { useAction, useDraft, usePoll } from "./hooks";
-import { ago, day, plural, stamp } from "./format";
+import { ago, day, plural, stamp, plainError } from "./format";
 import { Pagination, type Paging } from "./pagination";
 import { TailorChoice, type TailorState } from "./tailoring";
 import { Chips, SearchBox } from "./worktools";
@@ -46,6 +46,10 @@ type Employer = {
 };
 export type Artifact = {
   artifact_id: string;
+  /** This job's own choice of a tailored resume, when this is the version it holds. */
+  choice?: { mode: string; state: string } | null;
+  /** What went wrong, in words, when it couldn't be made. */
+  failure?: string | null;
   status:
     | "building"
     | "ready"
@@ -99,6 +103,7 @@ export type MasterView = {
     source_words?: number;
     source_fill?: Fill;
     render_fill?: Fill;
+    picture_pages?: number[];
   };
   created_at: string;
   approved_at: string | null;
@@ -600,7 +605,7 @@ export function employerLabel(id: string) {
 export const ARTIFACT_WORD: Record<string, string> = {
   ready: "Ready",
   building: "Building",
-  failed: "Needs repair",
+  failed: "Couldn't be made",
   cancelled: "Cancelled",
   invalid: "Out of date",
   kept_master: "Master kept",
@@ -649,7 +654,9 @@ export function JobResume({
   );
   const [tailored, setTailored] = useState<TailorState | null>(null);
   if (list.unavailable || (!list.data && !list.error)) return null;
-  const a = tailored ? undefined : list.data?.items?.[0];
+  const last = tailored ? undefined : list.data?.items?.[0];
+  // This job sends the uploaded resume, so a try that didn't finish says nothing about it: only a finished draft is still worth showing.
+  const a = masterOnly && last?.status !== "ready" ? undefined : last;
   return (
     <Panel
       title="Resume"
@@ -705,13 +712,7 @@ export function JobResume({
                 </Button>
               </div>
             )}
-            {a.status === "failed" && (
-              <p className="ax-note">
-                {a.error.detail || a.error.code}. This is an internal repair, not
-                a question for you
-                {a.error.retryable ? "; it is retried automatically" : ""}.
-              </p>
-            )}
+            {a.status === "failed" && <p className="ax-note">{a.failure || "It couldn't be made."}</p>}
             {a.status === "kept_master" && (
               <p className="ax-note">
                 The tailored draft did not read better than your master, so the
@@ -761,7 +762,7 @@ export function JobResume({
                 run(
                   "prepare",
                   async () => {
-                    const r = await api<{ status: string }>(
+                    const r = await api<{ status: string; error?: { code?: string } | null }>(
                       "/v2/resumes/prepare",
                       "POST",
                       { job_id: jobId },
@@ -773,7 +774,9 @@ export function JobResume({
                     r?.status === "ready"
                       ? "Tailored draft ready."
                       : r?.status === "use_master"
-                        ? "Your master resume is used for this job."
+                        ? r.error?.code === "no_model"
+                          ? "Tailoring needs your AI key. Add it in Settings, under Connections."
+                          : "Your uploaded resume is used for this job. To tailor it, choose Apply with tailored resume above."
                         : "Preparing a tailored draft.",
                 )
               }

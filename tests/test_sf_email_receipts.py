@@ -130,6 +130,22 @@ async def test_employer_receipt_confirms_a_run_left_waiting_for_the_browser(serv
         assert s.get(Job, jid).status == "confirmed"
 
 
+async def test_employer_receipt_cant_confirm_a_run_that_reached_another_posting(service, monkeypatch):
+    """The same mail as the test above. The run's page named another role, so this job stays unknown."""
+    _DRAFT_COMPARED.clear()
+    rid, jid, start = unproven_run(service)
+    with service.db.session() as s:
+        s.get(Run, rid).receipt = {"other_posting": True}
+    mailbox(
+        monkeypatch,
+        service,
+        [ack("ack", start + timedelta(minutes=5), "Thank you for applying to Example and the Engineer role.")],
+    )
+    assert (await reconcile_recent_drafts(service.mail))["emails_confirmed"] == 0
+    with service.db.session() as s:
+        assert s.get(Run, rid).state != "confirmed" and s.get(Job, jid).status != "confirmed"
+
+
 async def test_receipt_for_another_role_confirms_nothing_and_is_not_fetched_again(service, monkeypatch):
     _DRAFT_COMPARED.clear()
     rid, _, start = unproven_run(service, title="Platform Engineer")

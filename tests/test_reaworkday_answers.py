@@ -89,3 +89,24 @@ def test_the_resolver_leaves_an_age_claim_to_its_fact_check_even_for_a_minor(ser
     claim = "I acknowledge that I am at least 18 years of age."
     assert resolver(service, facts=minor).local(field(claim, ACK)) is None
     assert resolver(service, facts=minor).local(field(I9, ACK)).value == "I Acknowledge"
+
+
+def test_a_question_only_called_other_is_never_answered_from_what_another_other_was_told():
+    """One person's reply to an "Other" follow-up was typed into an optional "Other" social-network URL: "Invalid URL", five stopped runs."""
+    from jobpilot.answers.validate import BARE_OTHER
+
+    assert BARE_OTHER.fullmatch("Other") and BARE_OTHER.fullmatch("Other *") and BARE_OTHER.fullmatch(" Others: ")
+    assert not BARE_OTHER.fullmatch("Other names you have used") and not BARE_OTHER.fullmatch("If other, please specify")
+
+
+def test_required_questions_no_saved_fact_backs_are_put_to_the_person_with_the_pages_own_options():
+    from jobpilot.browser import unbacked_answers_result
+
+    waiver = {"question": "Waiver I waive any privileges and I release from any liability all persons.", "options": ["I agree", "I don't agree"],
+              "key": "answers-v9:waiver", "reason": "disclosure_scope", "blocker_type": "model_output", "retryable": True, "required": True}
+    result = unbacked_answers_result([waiver])
+    assert result["state"] == "needs_review" and result["blocker_type"] == "missing_fact"
+    review = result["reviews"][0]
+    assert review["options"] == ["I agree", "I don't agree"] and review["blocker_type"] == "missing_fact" and review["retryable"] is False
+    assert "disclosure_scope" not in str(review)  # Engine words never reach the person.
+    assert unbacked_answers_result([{**waiver, "key": ""}])["state"] == "waiting_browser"

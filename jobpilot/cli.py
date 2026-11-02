@@ -294,6 +294,9 @@ def main():
         import uvicorn
 
         from .api import create_app
+        from .redaction import mask_this_process
+
+        mask_this_process()  # Its output is the log file: nothing it logs, prints or traces carries a secret.
 
         # A hung request must not hold the stop up: the drain runs in the lifespan shutdown, after this wait.
         uvicorn.run(

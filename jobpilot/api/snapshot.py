@@ -159,6 +159,16 @@ def build_snapshot(service, include_sources: bool):
     from ..autopilot import batch_snapshot
 
     runtime = batch_snapshot(service)
+    from ..waiting import why
+
+    # Why nothing is starting, for Overview and the sidebar: never at the cost of the one poll.
+    try:
+        waiting = why(service)
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).exception("Why nothing is starting could not be read")
+        waiting = {"reason": None, "ask": None, "battery": "", "slow": "", "in_line": 0}
     # Jobs › Discovered's count, the same number its page shows (fresh listings not applied to yet).
     counts = {**counts, "discovered": runtime["inventory"]["discovered"]}
     return {
@@ -184,6 +194,7 @@ def build_snapshot(service, include_sources: bool):
             k: v for k, v in db.get_setting("job_board_autopilot", {}).items() if k not in BATCH_BOOKKEEPING
         },
         "autopilot_runtime": runtime,
+        "waiting": waiting,
         "discovery_settings": db.get_setting("job_board_settings", {}),
         "scheduler_health": db.get_setting("scheduler_health", {}),
         "scheduler_heartbeat": db.get_setting("scheduler_heartbeat", {}),

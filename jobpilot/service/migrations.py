@@ -23,6 +23,20 @@ class MigrationsMixin:
 
         label_jobs_from_history(self.db)
 
+    def no_ids_as_employers(self):
+        """An id (a board named by its UUID) stored as an employer is no name: it is cleared here and read from the posting or its board."""
+        from ..db import Source
+        from ..posting_identity import INTERNAL_ID
+
+        shape = "________-____-____-____-____________"
+        with self.db.session() as s:
+            for job in s.scalars(select(Job).where(Job.company.like(shape))):
+                if INTERNAL_ID.fullmatch(job.company):
+                    job.company = ""
+            for source in s.scalars(select(Source).where(Source.name.like(shape))):
+                if INTERNAL_ID.fullmatch(source.name):
+                    source.name = "Company not listed"
+
     def employer_names_from_titles(self):
         """Jobs and sources saved with a portal page title as their employer ("Job Listings at PepsiCo") take the
         employer's name (2026-10-23: 669 iCIMS jobs; receipts and employer caps never matched them)."""

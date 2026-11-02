@@ -30,6 +30,7 @@ from jobpilot.db import Event, Job, Resume, Review, Run, Setting
 from jobpilot.discovery import add_job
 from jobpilot.answers import Resolver
 from jobpilot.schemas import Answer, JobInput
+from support_chrome import chrome_opens_a_tab
 
 pytestmark = [pytest.mark.browser, pytest.mark.integration]
 
@@ -107,12 +108,14 @@ async def start_chrome(temp):
     argv = browser_module.throwaway_chrome(executable, temp, True)
     process = await asyncio.create_subprocess_exec(*argv, "about:blank", stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
     portfile = os.path.join(temp, "DevToolsActivePort")
-    for _ in range(100):
+    for _ in range(3000):  # until Chrome has written its port
         if os.path.exists(portfile) and os.path.getsize(portfile):
             break
         await asyncio.sleep(0.1)
     with open(portfile) as f:
-        return process, f"http://127.0.0.1:{f.read().splitlines()[0]}"
+        address = f"http://127.0.0.1:{f.read().splitlines()[0]}"
+    await chrome_opens_a_tab(address, 300)
+    return process, address
 
 
 async def until(check, seconds, step=0.5):
@@ -307,7 +310,7 @@ async def test_i_submitted_it_myself_is_recorded_as_sent_and_a_retry_is_refused(
             state = await page.evaluate("[...document.querySelectorAll('input')].map(i => [i.id, i.type === 'file' ? i.files.length : i.value, i.validity.valid])")
             assert all(v[2] for v in state), state
             await page.click("button[type=submit]", no_wait_after=True)
-            for _ in range(50):
+            for _ in range(1500):  # until the employer's page has answered
                 if await page.title() == "Thank you":
                     break
                 await asyncio.sleep(0.2)
@@ -356,5 +359,31 @@ async def test_the_tab_cleanup_leaves_a_held_tab_alone_and_closes_it_once_releas
         with httpx.Client(timeout=3, trust_env=False) as client:
             result = await asyncio.to_thread(close_inactive_tabs, service.db, endpoint, client)
         assert result["closed"] >= 1 and not await world.tab(expect=False), result
+    finally:
+        await world.close()
+
+
+async def test_done_after_the_tab_was_closed_keeps_nothing_by_hand(service):
+    """Done, continue hands back only the page the person saw. With the tab gone, what they typed there is gone too: the run opens the
+    application again and asks, rather than treating whatever is on the new page as their answer."""
+    world, before = await taken_over(service)
+    try:
+        job_id = world.job_id
+        await steer.start(service, job_id)
+        assert await until(lambda: steer.record(service.db, job_id).get("phase") == "yours" and not world.live(), 150), world.runs(job_id)
+
+        async def by_hand_then_close(page):
+            await page.fill("#q", "functional, by hand")
+            await page.close()
+
+        await as_the_owner(world, by_hand_then_close)
+        assert not await world.tab(expect=False)
+        await steer.finish(service, job_id, "done")
+        stopped = await until(lambda: world.runs(job_id)[-1][0] not in {"queued", "running", "submitting"} and not world.live(), 150)
+        assert stopped, world.runs(job_id)
+        assert not world.site.received, world.site.received
+        with service.db.session() as s:
+            kept = [e.message for e in s.scalars(select(Event).where(Event.kind == "owner_values")) if e.message.startswith("Kept")]
+        assert not kept, kept
     finally:
         await world.close()

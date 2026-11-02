@@ -10,7 +10,7 @@ import { useAction, useDraft, useNow, usePoll } from "./hooks";
 import { appliedState, rowFromServer, stateInfo, STATES, withMarks, type JobRow } from "./model";
 import { Pagination, type Paging } from "./pagination";
 import type { ReservedEmployer, ReservedPage, ReservedRules } from "./types";
-import { ago, jobWords, plural } from "./format";
+import { ago, jobWords, plural, plainReason } from "./format";
 import { ShieldCheck, SearchX } from "lucide-react";
 import { Button, Check, Drawer, Empty, Input, Table, type Column } from "./ui/index";
 import { Chips, ConfirmButton, JobCell, LoadError, Note, SearchBox, StatusPill } from "./worktools";
@@ -75,7 +75,7 @@ export function ReservedJobs() {
         void refresh();
         return r;
       },
-      (r) => r && `${plural(r.approved, "job")} approved at ${current.label}. The autopilot applies to the ones that fit.`,
+      (r) => r && `${plural(r.approved, "job")} approved at ${current.label}. AXIOM applies to the ones that match.`,
     );
 
   const columns: Column<JobRow>[] = [
@@ -88,7 +88,7 @@ export function ReservedJobs() {
         <JobCell
           {...jobWords({ ...r.job, company: r.job.company || r.reserved?.employer })}
           onOpen={() => openJob(r.job.id, r.run?.id)}
-          meta={r.state !== "reserved" ? <StatusPill state={r.state} /> : r.job.score != null ? <span className="mono">Fit {r.job.score}</span> : undefined}
+          meta={r.state !== "reserved" ? <StatusPill state={r.state} /> : r.job.score != null ? <span className="mono">Match {r.job.score}</span> : undefined}
         />
       ),
     },
@@ -104,15 +104,16 @@ export function ReservedJobs() {
         r.state !== "reserved" ? (
           <StatusPill state={r.state} />
         ) : r.run ? (
-          <Note title={r.run.reason}>
+          <Note title={plainReason(r.run.reason)}>
             {plural(r.attempts, "try", "tries")} · last: {stateInfo(r.run.state).label}
-            {r.run.reason ? ` · ${r.run.reason}` : ""}
+            {r.run.reason ? ` · ${plainReason(r.run.reason)}` : ""}
           </Note>
         ) : (
-          <StatusPill state={"job:" + r.job.status} />
+          // Never its job status: Ready reads "In queue" elsewhere, and this row is the one thing that is not in line.
+          <StatusPill state="reserved" label="Needs your approval" />
         ),
     },
-    { key: "fit", header: "Fit", hideBelow: 600, num: true, cell: (r) => r.job.score ?? "—" },
+    { key: "fit", header: "Match", hideBelow: 600, num: true, cell: (r) => r.job.score ?? "—" },
     {
       key: "updated",
       header: "Updated",
@@ -130,15 +131,18 @@ export function ReservedJobs() {
       pin: true,
       cell: (r) =>
         r.state === "reserved" ? (
-          <Button
-            size="sm"
-            className="ax-lead"
-            disabled={pending !== null}
-            loading={pending === "approve:" + r.job.id}
-            onClick={() => approve(r.job.id)}
-          >
-            Approve and apply
-          </Button>
+          // Inside the row's own click: the press also opened the job's panel over the page.
+          <div className="ax-act" onClick={(e) => e.stopPropagation()}>
+            <Button
+              size="sm"
+              className="ax-lead"
+              disabled={pending !== null}
+              loading={pending === "approve:" + r.job.id}
+              onClick={() => approve(r.job.id)}
+            >
+              Approve and apply
+            </Button>
+          </div>
         ) : null,
     },
   ];
@@ -172,7 +176,7 @@ export function ReservedJobs() {
             <div className="ax-toolbar-end">
               <ConfirmButton
                 label={`Approve all ${current.held}`}
-                question={`Lift the hold on ${plural(current.held, "job")}? The autopilot applies to the ones that fit.`}
+                question={`Lift the hold on ${plural(current.held, "job")}? AXIOM applies to the ones that match.`}
                 confirmLabel="Approve all"
                 danger={false}
                 loading={pending === "all"}
@@ -206,7 +210,7 @@ export function ReservedJobs() {
       )}
       {data && (
         <Drawer open={editing} onClose={() => setEditing(false)} title="Reserved" width={560}>
-          <Manager rules={data.rules} />
+          <Manager rules={data.rules} onSaved={(rules) => list.setData((was) => was && { ...was, rules })} />
         </Drawer>
       )}
     </>
@@ -215,7 +219,7 @@ export function ReservedJobs() {
 
 // The user's own list: add a company by name or a job board by its link, take any off (the suggested FAANG, MANGO and Big Four
 // included). The server keeps and validates the list; each press is one request.
-function Manager({ rules }: { rules: ReservedRules }) {
+function Manager({ rules, onSaved }: { rules: ReservedRules; onSaved: (rules: ReservedRules) => void }) {
   const { refresh } = useWorkspace();
   const { pending, run } = useAction();
   const [text, setText] = useDraft("reserve-text", "");
@@ -223,8 +227,9 @@ function Manager({ rules }: { rules: ReservedRules }) {
     run(
       "add",
       async () => {
-        const r = await api<{ reserved: string }>("/reserved/employers", "POST", { text: text.trim() });
+        const r = await api<{ reserved: string; rules: ReservedRules }>("/reserved/employers", "POST", { text: text.trim() });
         setText("");
+        onSaved(r.rules);
         void refresh();
         return r;
       },
@@ -234,7 +239,8 @@ function Manager({ rules }: { rules: ReservedRules }) {
     run(
       "rm:" + name,
       async () => {
-        await api("/reserved/employers?name=" + encodeURIComponent(name), "DELETE");
+        const r = await api<{ rules: ReservedRules }>("/reserved/employers?name=" + encodeURIComponent(name), "DELETE");
+        onSaved(r.rules);
         void refresh();
       },
       `${name} is no longer reserved.`,
@@ -243,7 +249,8 @@ function Manager({ rules }: { rules: ReservedRules }) {
     run(
       "suggested",
       async () => {
-        await api("/reserved", "PUT", { ...rules, enabled: on });
+        const r = await api<{ rules: ReservedRules }>("/reserved", "PUT", { ...rules, enabled: on });
+        onSaved(r.rules);
         void refresh();
       },
       on ? "FAANG, MANGO and the Big Four are held until you approve." : "FAANG, MANGO and the Big Four apply like any other employer.",

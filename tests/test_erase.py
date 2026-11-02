@@ -15,6 +15,13 @@ from jobpilot.native.supervisor import Child, Supervisor
 from tests.test_native_database_choice import installation, no_postgres_binaries  # noqa: F401
 
 
+@pytest.fixture(autouse=True)
+def logs_of_the_test(tmp_path, monkeypatch):
+    """The eraser empties the logs: a test must never reach the real folder (the installed app sets AXIOM_LOG_DIR)."""
+    monkeypatch.setenv("AXIOM_LOG_DIR", str(tmp_path / "logs"))
+    monkeypatch.setenv("AXIOM_BACKUP_DIR", str(tmp_path / "copies"))
+
+
 def populated(tmp_path):
     data = tmp_path / "data"
     for name in ("runs/r1/steps", "resumes", "sessions", "desktop-browser/Default", "twin-browser", "archive", "migration", "native", "postgres"):
@@ -38,6 +45,48 @@ def test_everything_goes_and_only_scaffolding_stays(tmp_path):
     assert (data / "postgres" / "PG_VERSION").exists() and (data / "native" / "state.json").exists()
     # The copies go, a stranger's file does not, and the folder stays because it is not empty.
     assert [p.name for p in backups.iterdir()] == ["someone-elses.txt"]
+
+
+def test_the_logs_are_cleared_with_the_rest(tmp_path, monkeypatch):
+    config, data, backups = populated(tmp_path)
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    for name in ("app.log", "app.log.1", "postgres.log", "axiom-erase.log"):
+        (logs / name).write_text("Example Employer\n")
+    monkeypatch.setenv("AXIOM_LOG_DIR", str(logs))
+    erase.run(config, say=lambda _: None, backups=backups)
+    assert (logs / "app.log").read_text() == "" and (logs / "postgres.log").read_text() == ""  # Kept open by what still runs.
+    assert not (logs / "app.log.1").exists()
+    assert (logs / "axiom-erase.log").read_text()  # What was removed, and nothing else.
+
+
+def test_logs_are_emptied_in_place_and_every_database_copy_goes(tmp_path):
+    config, data, backups = populated(tmp_path)
+    (backups / "pre-compact-20261030.dump").write_text("d")  # made by hand, under another name: the same data
+    (backups / "axiom-20261101.dump.partial").write_text("d")
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    (logs / "app.log").write_text("applied to Acme: answered the salary question\n")
+    (logs / "app.log.1").write_text("older\n")
+    (logs / erase.log_path().name).write_text("12:00:00 Done.\n")
+    (data / "native" / "logs").mkdir()
+    (data / "native" / "logs" / "worker.log").write_text("Acme\n")
+    held = open(logs / "app.log", "a")  # the supervisor holds its log open for appending
+    try:
+        assert erase.run(config, say=lambda _: None, backups=backups) == []
+        held.write("after\n")
+        held.flush()
+    finally:
+        held.close()
+    assert (logs / "app.log").read_text() == "after\n"  # emptied, still the file the program writes to
+    assert not (logs / "app.log.1").exists()
+    assert (logs / erase.log_path().name).read_text() == "12:00:00 Done.\n"
+    assert (data / "native" / "logs" / "worker.log").read_text() == ""
+    assert [p.name for p in backups.iterdir()] == ["someone-elses.txt"]
+
+
+def test_the_screen_says_the_keys_stay_valid_at_their_services():
+    assert any("AI key" in line and "revoke" in line for line in erase.CANNOT)
 
 
 def test_an_empty_backup_folder_is_removed_with_its_last_copy(tmp_path):
@@ -104,3 +153,64 @@ def test_legal_acceptance_is_per_version_and_needs_the_adult_box(client, service
     assert service.db.get_setting("legal_acceptance")["version"] == legal.VERSION
     service.db.set_setting("legal_acceptance", {"version": "older", "accepted_at": "x"})  # a new version asks again
     assert client.get("/api/legal").json()["accepted"] is False
+
+
+def test_the_mac_apps_settings_file_keeps_only_what_is_about_this_machine(tmp_path):
+    settings = tmp_path / ".env"
+    settings.write_text(
+        "# Written by AXIOM\nPOSTGRES_PASSWORD=keep-me\nTIMEZONE=UTC\nNORMAL_WORKERS=3\nAXIOM_PG_PORT=5\nAPP_TOKEN=keep-too\n"
+        "DEEPSEEK_API_KEY=synthetic\nTELEGRAM_BOT_TOKEN=synthetic\nAPPLICATION_PASSWORD=synthetic\nACCOUNT_EMAIL=someone@example.invalid\n"
+    )
+    settings.chmod(0o600)
+    assert erase.forget_settings({"AXIOM_CONFIG_DIR": str(tmp_path)}, say=lambda _: None) == []
+    text = settings.read_text()
+    assert all(k in text for k in ("POSTGRES_PASSWORD=keep-me", "TIMEZONE", "NORMAL_WORKERS", "AXIOM_PG_PORT", "APP_TOKEN=keep-too"))
+    assert not any(k in text for k in ("DEEPSEEK", "TELEGRAM", "APPLICATION_PASSWORD", "example.invalid"))
+    assert settings.stat().st_mode & 0o077 == 0
+
+
+def test_a_checkouts_settings_file_is_left_alone(tmp_path):
+    settings = tmp_path / ".env"
+    settings.write_text("DEEPSEEK_API_KEY=synthetic\n")
+    assert erase.forget_settings({}, say=lambda _: None) == []
+    assert "DEEPSEEK" in settings.read_text()
+
+
+def test_the_screen_says_copies_outside_axiom_stay():
+    assert any("Time Machine" in line for line in erase.CANNOT)
+
+
+def test_a_real_postgresql_loses_every_table_and_the_write_ahead_log_that_held_the_rows(tmp_path):
+    """SQLite's file simply goes, so only this shows the feature tables (facts, answers, tailored resumes) and pg_wal."""
+    from sqlalchemy import inspect, text
+    from support_pg import ScratchServer, find_bin
+
+    from jobpilot.db import Database
+    from jobpilot.features._store import FeatureBase, create_tables
+
+    bin_dir = find_bin()
+    if not bin_dir:
+        pytest.skip("PostgreSQL 17 is not installed")
+    server = ScratchServer(bin_dir, tmp_path / "pg").start()
+    try:
+        url = server.url(server.create_database())
+        db = Database(url)
+        create_tables(db.engine)
+        assert FeatureBase.metadata.tables
+        marker = "Synthetic-Answer-Marker-" + os.urandom(6).hex()
+        db.set_setting("profile", {"name": marker})
+        with db.engine.begin() as connection:
+            connection.execute(text("CREATE TABLE left_by_an_older_version (x text)"))
+            connection.execute(text("INSERT INTO left_by_an_older_version VALUES (:m)"), {"m": marker})
+        db.engine.dispose()
+        wal = next(server.directory.rglob("pg_wal"))
+        held = lambda: any(marker.encode() in p.read_bytes() for p in wal.iterdir() if p.is_file())  # noqa: E731
+        assert held(), "the proof needs the rows in the log first"
+        erase.wipe_database(url, lambda _: None)
+        fresh = Database(url)
+        left = set(inspect(fresh.engine).get_table_names())
+        fresh.engine.dispose()
+        assert not left & (set(FeatureBase.metadata.tables) | {"left_by_an_older_version"})
+        assert not held()
+    finally:
+        server.stop()

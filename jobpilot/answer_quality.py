@@ -29,7 +29,12 @@ NARRATIVE = re.compile(
     r"why\b|cover.?letter|motivat|describe|description|tell us|achievement|accomplish|experience with|responsibilit|duties",
     re.I,
 )
-SECRET = re.compile(r"\bpasswords?\b|one.?time|verification code|authentication code|security code", re.I)
+# A credential box names itself briefly. A long Yes/No question that merely mentions a "username and password" ("If you are currently a
+# Brown University Health employee, you MUST apply using your ... username and password via the Jobs Hub") is an ordinary question
+# (forms.AUTH has the same bound, 98306be).
+SECRET = re.compile(
+    r"^(?=.{0,120}$).*?(?:\bpasswords?\b|one.?time|verification code|authentication code|security code)", re.I | re.S
+)
 
 
 class QualityCorrection(BaseModel):
@@ -77,10 +82,11 @@ def advice_budget(config, run, reserve=2):
     agents keep them. The cap is the run's own (a specialist's is larger, SPECIALIST_BUDGET_MULTIPLIER)."""
     if run is None:
         return True
+    from .pipeline_comparison import budget_class
     from .tiers import call_limit
 
     packet = run.packet or {}
-    return run.model_calls < call_limit(config, packet.get("runner_tier", 1), packet.get("worker_pool")) - reserve
+    return run.model_calls < call_limit(config, packet.get("runner_tier", 1), budget_class(packet)) - reserve
 
 
 def money_range(text):

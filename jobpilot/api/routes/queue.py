@@ -75,8 +75,10 @@ def router(service) -> APIRouter:
         (queue_order.py), one page at a time; then what it is retrying by itself. A `def` route: this reads on a worker thread."""
         from ...queue_order import active_rows, dispatching, plans
 
+        from ...waiting import why
+
         planner = plans(service)
-        value = planner.ready(service)
+        value = planner.current(service)
         control = db.get_setting("control", {}) or {}
         board = db.get_setting("job_board_settings", {}) or {}
         running = active_rows(service)
@@ -87,27 +89,34 @@ def router(service) -> APIRouter:
                 "auto_apply": bool(board.get("enabled") and board.get("auto_apply")), "dispatching": dispatching(db), "stopped": None,
                 "workers": {**{k: getattr(config.topology, k) for k in ("normal", "specialist", "custom")}, "free": 0},
                 "decides": "", "exact": 0, "running": running, "next": [], "total": 0, "page": 1, "pages": 1, "size": size,
-                "retrying": planner.retrying(service), "held": [], "held_total": 0, **_requests(),
+                "retrying": planner.retrying(service), "held": [], "held_total": 0, "why": why(service), **_requests(),
             }
         items = value["next"]
         size = max(1, min(100, int(size)))
         pages = max(1, -(-len(items) // size))
         page = max(1, min(int(page), pages))
-        drop = {"employer", "lane", "details", "status", "tailoring", "not_before", "front", "paced"}
+        drop = {"employer", "lane", "details", "status", "tailoring", "not_before", "front", "paced", "code"}
         reading = value["reading"]
         from ...features.resumes.choice import waiting_words
 
         shown = items[(page - 1) * size : page * size]
         tailoring = waiting_words(db, [item["id"] for item in shown])
         shown = [{**item, "wait": tailoring[item["id"]]} if item["id"] in tailoring else item for item in shown]
+        # Every row says what it waits on: no row comes back without a reason.
+        shown = [{**item, "wait": item.get("wait") or ("The next free worker." if item["position"] <= value["exact"] else "Its turn, after the jobs above it.")} for item in shown]
+        said = why(service, value)
+        # What holds everything holds each job: a row doesn't promise "the next free worker" under a stop or a used-up limit.
+        if (reason := said["reason"]) and reason["blocking"] and reason["code"] not in {"paced", "line_waits"}:
+            shown = [{**item, "wait": reason["row"]} for item in shown]
         return {
+            "why": said,
             "at": value["at"],
             "paused": bool(control.get("paused")),
             "auto_submit": bool(control.get("auto_submit")),
             "auto_apply": bool(board.get("enabled") and board.get("auto_apply")),
             "dispatching": dispatching(db),
             "stopped": reading.get("stopped"),
-            "workers": {**{k: getattr(config.topology, k) for k in ("normal", "specialist", "custom")}, "free": value["free"]},
+            "workers": {**{k: getattr(config.topology, k) for k in ("normal", "specialist", "custom")}, "free": value["free"], "normal_free": value["rooms"]["normal"]},
             "decides": value["decides"],
             "exact": value["exact"],
             "running": running,

@@ -615,3 +615,93 @@ button.nd-asking:hover strong {
 /* Take over: the panel shown while you have an application (steer.tsx). Plain: a sentence, three buttons, a note. */
 .nd-steer { display: grid; gap: var(--space-3, 12px); padding: var(--space-4, 16px) 0; }
 .nd-steer p { margin: 0; }
+
+/* A list too long for buttons: every choice on the screen, in its whole wording, and a box that narrows it. */
+.nd-choices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.nd-choice-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  max-height: 320px;
+  overflow-y: auto;
+  padding: var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--inset);
+}
+.nq-answer .nd-choice-list .ax-check {
+  justify-content: flex-start;
+  align-items: flex-start;
+  min-height: 0;
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  box-shadow: none;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.nq-answer .nd-choice-list .ax-check:hover {
+  background: var(--hover);
+}
+.nq-answer .nd-choice-list .ax-check,
+.nq-answer .nd-choice-list .ax-check:has(input:checked) {
+  color: var(--ink);
+}
+.nq-answer .nd-choice-list .ax-check:has(input:checked) {
+  border-color: transparent;
+  background: var(--active);
+}
+.nq-answer .nd-choice-list[role="radiogroup"].nd-choice-list .ax-check input {
+  position: static;
+  width: auto;
+  height: auto;
+  margin-top: 3px;
+  opacity: 1;
+  pointer-events: auto;
+  appearance: auto;
+  accent-color: var(--ink);
+}
+/* Ticking several rows of the inbox: the box sits beside the row's button, not inside it. */
+.nd-bulk {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+}
+.nd-bulk .ax-check {
+  margin-right: auto;
+}
+.nd-rowline {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--line);
+}
+.nd-rowline .nd-row {
+  flex: 1;
+  min-width: 0;
+  border-bottom: 0;
+  padding-left: var(--space-2);
+}
+.nd-rowline:has(.nd-row[aria-current]) {
+  background: var(--active);
+}
+.nd-rowline:has(.nd-row[aria-current]) .nd-row {
+  background: transparent;
+}
+.nd-pick {
+  display: flex;
+  flex: none;
+  align-items: flex-start;
+  padding: var(--space-3) 0 var(--space-3) var(--space-4);
+  cursor: pointer;
+}

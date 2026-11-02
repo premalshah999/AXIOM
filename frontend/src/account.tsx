@@ -31,6 +31,8 @@ export type AccountStatus = {
 };
 
 const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+// desktop/AXIOM.m gives its window this handler, and signs that window in with the access token whatever is set here.
+const IN_MAC_WINDOW = !!(window as unknown as { webkit?: { messageHandlers?: { axiom?: unknown } } }).webkit?.messageHandlers?.axiom;
 // The server's policy (owner_account.password_problem), checked while the owner types.
 const RULES: { label: string; test: (p: string) => boolean }[] = [
   { label: "At least 10 characters", test: (p) => p.length >= 10 },
@@ -934,7 +936,7 @@ function SignedInAccount({ status, reload }: { status: AccountStatus; reload: ()
         title="Recovery codes"
         note={
           !codes
-            ? "None yet. Without them, a forgotten password needs the access token or the host command."
+            ? "None yet. Without them, a forgotten password can only be reset with this installation's access token."
             : `${codes.left} of ${codes.total} unused${codes.created_at ? `, created ${day(codes.created_at)}` : ""}. Each resets a forgotten password once.`
         }
       >
@@ -953,7 +955,7 @@ function SignedInAccount({ status, reload }: { status: AccountStatus; reload: ()
           />
         </li>
       )}
-      <SettingRow title="This device" note={`${browserSession(status)}. Applications keep running on the server.`}>
+      <SettingRow title="This device" note={`${browserSession(status)}. Applications keep running in AXIOM.`}>
         <Button
           disabled={pending !== null}
           onClick={() =>
@@ -1148,7 +1150,11 @@ function AddSignIn({ onAdded }: { onAdded: () => void }) {
         if (created) setCodes(created.recovery_codes);
       }}
     >
-      <p className="ax-hint">Anyone who can open AXIOM on this computer can use it. Add an email and password to require signing in.</p>
+      <p className="ax-hint">
+        {IN_MAC_WINDOW
+          ? "This window signs itself in, so anyone who can open AXIOM on this Mac can use it. An email and password are only for opening AXIOM in a web browser."
+          : "Anyone who can open AXIOM on this computer can use it. Add an email and password to require signing in."}
+      </p>
       <FormGrid>
         <Field label="Full name" error={errors.name}>
           <input
@@ -1186,11 +1192,13 @@ const ERASES = [
   "your profile, resumes, answers and every saved application page",
   "the jobs, queue and history",
   "the accounts and passwords AXIOM saved, your AI key and the mailbox connection",
-  "the cached Chrome profile and the automatic database backups",
+  "the cached Chrome profile, the database backups and the logs",
 ];
 const CANNOT_REMOVE = [
   "Applications already sent. The employers have them.",
   "Accounts AXIOM created at employers. Close them on the employers' sites; their emails to you stay in your own mailbox.",
+  "Your AI key and your Gmail app password. They still work at the services that issued them: revoke them there.",
+  "Copies outside AXIOM: a Time Machine backup of this Mac, or a database copy you saved to another folder.",
 ];
 
 /** Delete everything: stops work, removes the data and leaves the app as on its first run. Typed confirmation, and no undo. */

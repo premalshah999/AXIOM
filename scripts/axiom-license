@@ -1,0 +1,7 @@
+#!/bin/sh
+# The owner's license command (scripts/axiom_license.py, docs/LICENSING.md). Uses the app's virtualenv, as scripts/axiom does.
+set -eu
+root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+venv=${AXIOM_VENV:-${UV_PROJECT_ENVIRONMENT:-$root/.venv}}
+[ -x "$venv/bin/python" ] || { echo "axiom-license: the app's Python is not set up here. Run: scripts/axiom setup" >&2; exit 1; }
+exec "$venv/bin/python" "$root/scripts/axiom_license.py" "$@"

@@ -200,7 +200,8 @@ class Settings(BaseSettings):
     gmail_app_password: str = ""
     mail_encryption_key: str = ""
     mail_poll_seconds: float = Field(default=3, ge=0.1, le=60)
-    mail_wait_seconds: int = Field(default=90, ge=5, le=300)
+    # What every confirmed application waited (it was set only in one .env); a code later than this parks the run and frees its browser.
+    mail_wait_seconds: int = Field(default=120, ge=5, le=300)
     # Persisted waits release their browser slot; delivery need not happen in
     # the short synchronous polling window. Never renew this limit on retry.
     mail_durable_wait_seconds: int = Field(default=1200, ge=300, le=1800)
@@ -215,6 +216,9 @@ class Settings(BaseSettings):
     company_logos: bool = True
     # Wall-clock time, model calls and the per-job token cap are this many times larger on a specialist.
     specialist_budget_multiplier: float = Field(default=1.5, ge=1, le=3)
+    # The same for a custom site's escalated run, which stays on the custom-site worker. 1: it gets a different
+    # strategy (the failed ones listed, its own attempts) but no larger cost ceiling; raising it is the owner's call.
+    custom_escalation_multiplier: float = Field(default=1.0, ge=1, le=3)
     # Failures on ATS workers before a job moves to a specialist.
     specialist_after_failures: int = Field(default=2, ge=1, le=5)
     # Specialist attempts per job before it is left for the owner.
@@ -271,6 +275,9 @@ class Settings(BaseSettings):
     repair_agent_enabled: bool = True
     enable_workers: bool = True
     enable_demo: bool = True
+    # The Mac app sets this: its window signs in with the access token before it shows anything, so an empty installation's sign-up
+    # needs that session. Without it, any process on this computer could claim the installation first.
+    signup_needs_session: bool = False
     allow_private_urls: bool = False  # Tests only. Never enabled by the production image.
     # The local URLs as they were before a remote choice replaced them (what a switch copies from or back to), and the choice
     # this process started with (so the screen can say a restart is needed).
@@ -341,6 +348,9 @@ class Settings(BaseSettings):
                 with os.fdopen(fd, "w") as f:
                     f.write(secrets.token_urlsafe(32))
             self.app_token = token_file.read_text().strip()
+        from .redaction import register_config
+
+        register_config(self)  # Events, Telegram and saved pages mask these exact values from now on.
         from . import db as database
         from .storage.choice import apply as apply_database_choice
 

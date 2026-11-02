@@ -411,7 +411,13 @@ function EmployerBoards({ board: b, reload }: { board: Board; reload: () => Prom
         empty={
           <Empty
             title={q ? "No boards match" : "No employer boards yet"}
-            hint={q ? "Try a shorter search." : "Turn on automatic search and save to load the built-in catalog, or add a board."}
+            hint={
+              q
+                ? "Try a shorter search."
+                : b.settings?.enabled
+                  ? "Press Check every board now to load the built-in list, or add a board."
+                  : "Turn on Search automatically and save to load the built-in list, or add a board."
+            }
             action={
               q ? undefined : (
                 <Button size="sm" onClick={() => setAdding(true)}>

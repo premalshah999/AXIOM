@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { plainError } from "../format";
 import { Button } from "./Button";
 
 /** A quiet "still loading" line. Lists use Skeleton instead, so the page keeps its shape. */
@@ -31,7 +32,7 @@ export function ErrorLine({ error, retry }: { error: Error | string | ReactNode 
   if (!error) return null;
   return (
     <div className="ax-notice is-bad" role="alert">
-      <span>{error instanceof Error ? error.message : error}</span>
+      <span>{error instanceof Error ? plainError(error.message) : error}</span>
       {retry && (
         <Button size="sm" variant="ghost" onClick={retry}>
           Try again

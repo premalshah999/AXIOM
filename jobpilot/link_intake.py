@@ -183,16 +183,43 @@ URL_REFUSALS = {
 }
 
 
+# A posting always says one of these. A page that says none, in plenty of words, is an article or an About page.
+JOB_WORDS = re.compile(
+    r"\b(?:apply|applying|application|applicants?|jobs?|careers?|positions?|roles?|responsibilit\w+|qualifications?|requirements?|"
+    r"hiring|recruit\w*|resumes?|cv|employment|openings?|vacanc\w+|requisition|salary|compensation|experience|internship)\b",
+    re.I,
+)
+MIN_WORDS = 40  # Fewer: a page built by its script, or a bot check, which says nothing about the job.
+
+
+def not_a_posting(page_html, link):
+    """True only for a page we can read that plainly isn't a job: a known platform's page is its posting whatever it says, and a page
+    with little text proves nothing, so a real posting is never refused here. A run on such a page used to end in a vague failure."""
+    from .ats import detect
+
+    if detect(link).id != "custom":
+        return False
+    soup = BeautifulSoup(page_html or "", "html.parser")
+    for tag in soup(["script", "style", "noscript", "template"]):
+        tag.decompose()
+    text = soup.get_text(" ", strip=True)
+    if "JobPosting" in (page_html or ""):
+        return False
+    return len(text.split()) >= MIN_WORDS and not JOB_WORDS.search(text)
+
+
 async def opens(link, allow_private=False):
-    """A sentence when the employer's own page says the link is dead, else ''. 404 and 410 are what ranking already closes a
-    posting on (discovery.posting_gone); anything else (a 403 to a plain client, a slow site, no answer) says nothing about
-    the job, and the application's own browser finds out. Without this a dead link sat in the queue, then read as a failure."""
+    """A sentence when the employer's own page says the link is dead, or reads plainly as no job at all, else ''. 404 and 410 are what
+    ranking already closes a posting on (discovery.posting_gone); anything else (a 403 to a plain client, a slow site, no answer) says
+    nothing about the job, and the application's own browser finds out. Without this a dead link sat in the queue, then read as a failure."""
     from httpx import ConnectError, HTTPStatusError
 
     from .network import fetch
 
     try:
-        await asyncio.wait_for(fetch(link, allow_private=allow_private), READ_SECONDS)
+        page, final = await asyncio.wait_for(fetch(link, allow_private=allow_private), READ_SECONDS)
+        if not_a_posting(page, final):
+            return "This page doesn't look like a job posting. Open the job you want and paste the link from that job's own page. Nothing was added."
     except HTTPStatusError as exc:
         if exc.response.status_code in {404, 410}:
             return "This job's page is gone: the employer's site says it no longer exists. Nothing was added."

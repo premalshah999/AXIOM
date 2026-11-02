@@ -1,6 +1,7 @@
-import React, { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { LegalGate } from "./legal";
+import { LicenseBanner, LicenseGate } from "./license";
 import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/components.css";
@@ -31,7 +32,7 @@ import { Wordmark } from "./shell/Brand";
 import { CommandPalette } from "./shell/CommandPalette";
 import { ComingSoon } from "./shell/ComingSoon";
 import { ALL_ITEMS, titleFor } from "./shell/nav";
-import { Button, Loading, ToastStack } from "./ui/index";
+import { Button, Dialog, Loading, ToastStack } from "./ui/index";
 import { BatchView } from "./batch";
 import { BoardView } from "./jobboard";
 import { LedgerView } from "./ledger";
@@ -41,6 +42,7 @@ import { JobPanel } from "./jobdetail";
 import { AddJobDialog } from "./jobintake";
 import type { AccountStatus } from "./account";
 import { guideLater } from "./guide";
+import { hasUnsaved, useLeaveWarning } from "./shell/unsaved";
 
 // Profile, Resumes, Settings, the resume editor, sign-in and the setup guide are most of the dashboard's code and are rarely open:
 // they load when shown, so Batch and Jobs paint from a smaller bundle (2026-10-23).
@@ -63,6 +65,12 @@ function App() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [who, setWho] = useState<{ name?: string; email?: string }>({});
   const [palette, setPalette] = useState(false);
+  // Where you are, for the one question below: moving to another page or Settings section with unsaved changes asks first.
+  const here = useRef(route);
+  here.current = route;
+  const [leaving, setLeaving] = useState<Route | null>(null);
+  // Opening a job's panel or changing a filter stays on the page; only a different page or section loses the form.
+  const losesForm = (next: Route) => hasUnsaved() && (next.view !== here.current.view || next.tab !== here.current.tab);
 
   const notify = useCallback((tone: Toast["tone"], text: string) => {
     const id = Date.now() + Math.random();
@@ -87,8 +95,14 @@ function App() {
     // An old link (?view=setup&tab=email) is rewritten to its new home in the address bar; the page was already told.
     const pop = () => {
       const next = parseRoute();
-      const here = location.pathname + location.search + location.hash;
-      if (routeUrl(next) !== here) history.replaceState(null, "", routeUrl(next));
+      // Back or Forward: the browser has already moved, so the address goes back while the question is asked.
+      if (losesForm(next)) {
+        history.pushState(null, "", routeUrl(here.current));
+        setLeaving(next);
+        return;
+      }
+      const address = location.pathname + location.search + location.hash;
+      if (routeUrl(next) !== address) history.replaceState(null, "", routeUrl(next));
       setRoute(next);
     };
     pop();
@@ -100,11 +114,20 @@ function App() {
     };
   }, []);
 
-  const go = useCallback((raw: AnyRoute) => {
-    const next = canonical(raw);
+  useLeaveWarning();
+  const move = useCallback((next: Route) => {
     history.pushState(null, "", routeUrl(next));
     setRoute(next);
   }, []);
+  const go = useCallback(
+    (raw: AnyRoute) => {
+      const next = canonical(raw);
+      if (losesForm(next)) setLeaving(next);
+      else move(next);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [move],
+  );
 
   // Ask the public account endpoint first, so a signed-out visit shows sign-in without a failed request.
   useEffect(() => {
@@ -114,7 +137,12 @@ function App() {
       .then((s) => {
         if (!current) return;
         setAuth(s.signed_in ? "in" : "out");
+        // The Mac app's window signs itself in again when told (desktop/AXIOM.m), as it does for a 401: this answer is not one.
+        if (!s.signed_in) signedOut();
         if (s.signed_in) setWho({ name: s.name, email: s.email });
+        // No session on arrival, as after Delete everything: the Mac window listens for this and signs itself in. A browser just stays
+        // on the sign-in screen it was going to show.
+        else signedOut();
         if (s.signed_in && s.onboarding)
           setSetupGuide((g) => (g === "unknown" ? (s.onboarding!.completed ? "done" : unfinished()) : g));
       })
@@ -308,6 +336,7 @@ function App() {
           }}
           banners={
             <>
+              <LicenseBanner />
               {setupGuide === "later" && (
                 <div className="ax-banner" role="status">
                   <span>Your profile setup isn't finished.</span>
@@ -359,6 +388,27 @@ function App() {
           />
         )}
         <AddJobDialog />
+        <Dialog
+          open={leaving !== null}
+          onClose={() => setLeaving(null)}
+          title="Leave without saving?"
+          sub="You changed something on this page and didn't save it. If you leave now, the change is lost."
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => {
+                if (leaving) move(leaving);
+                setLeaving(null);
+              }}>
+                Leave and lose the change
+              </Button>
+              <Button variant="primary" onClick={() => setLeaving(null)}>
+                Keep editing
+              </Button>
+            </>
+          }
+        >
+          <p className="ax-hint">Press Save at the bottom of the page to keep it.</p>
+        </Dialog>
         <CommandPalette open={palette} onClose={() => setPalette(false)} />
         <ToastStack toasts={toasts} onDismiss={(id) => setToasts((list) => list.filter((x) => x.id !== id))} />
       </WorkspaceContext.Provider>
@@ -369,6 +419,8 @@ function App() {
 
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <App />
+    <LicenseGate>
+      <App />
+    </LicenseGate>
   </React.StrictMode>,
 );

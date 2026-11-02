@@ -97,6 +97,11 @@ class PolicyRulesMixin:
             yes = [o for o in options if re.match(r"^\s*yes\b", str(o), re.I)]
             if survey == "finished" and len(yes) == 1:
                 return self._ans(f, yes[0], ["policy:wotc-survey-finished-in-run"], "This run finished the survey")
+            if survey == "declined":
+                # Declined with the survey's own control where the employer calls it voluntary: it was not completed, and saying so is the truth.
+                no = [o for o in options if NO_OPTION.search(str(o)) and not DECLINE.search(str(o))]
+                if len(no) == 1:
+                    return self._ans(f, no[0], ["policy:wotc-survey-declined-in-run"], "This run declined the voluntary survey")
             if survey:
                 return Answer(
                     field_id=f["id"],

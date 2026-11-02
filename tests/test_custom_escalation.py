@@ -1,0 +1,306 @@
+"""A custom career site escalates its recovery strategy in its own lane (CODEX_CUSTOM_ATS_AUDIT item 3).
+
+Every fixture takes its worker lane from the real router (assign_pool), never a hand-set pool: the old tests seeded a
+normal-pool history for a custom job, a state the router cannot produce.
+"""
+
+from jobpilot.db import Job, Run, Setting
+from jobpilot.pipeline_comparison import (
+    CUSTOM,
+    CUSTOM_ESCALATED,
+    SPECIALIST,
+    STRATEGY_ESCALATED,
+    STRATEGY_STANDARD,
+    assign_pool,
+    assign_strategy,
+    budget_class,
+    escalated,
+    routed_budget,
+    worker_context,
+)
+from jobpilot.recovery import automatic_attempts, schedule_recovery, specialist_attempts
+from jobpilot.specialist import handoff_threshold, pool_boost, routing_note
+from jobpilot.tiers import call_limit
+
+STUCK = "control_observation"
+
+
+def add_job(service, job_id, ats):
+    with service.db.session() as s:
+        s.add(
+            Job(
+                id=job_id,
+                identity=job_id,
+                url=f"https://{job_id}.example.test/careers/1",
+                ats=ats,
+                status="waiting_browser",
+                company=job_id,
+                title="Engineer",
+            )
+        )
+
+
+def failed_run(service, job_id, run_id, ats="custom", *, source=None, cause=STUCK):
+    """A stopped run whose lane and strategy come from the same routing the queue uses."""
+    if not _exists(service, job_id):
+        add_job(service, job_id, ats)
+    with service.db.session() as s:
+        job = s.get(Job, job_id)
+        previous = s.get(Run, source) if source else None
+        packet = {
+            "match_approved": True,
+            "profile": {"autonomous": True},
+            "worker_pool": assign_pool(s, job, previous),
+            "recovery_cause": cause,
+            "blocker_type": "observation_failure" if cause == "navigation_stalled" else "control_failure",
+            "browser_checkpoint": {
+                "resume_sha": "abc",
+                "failed_strategies": {"fill:email": {"attempts": [{"state": "failed"}]}},
+            },
+        }
+        if assign_strategy(job, previous) == STRATEGY_ESCALATED:
+            packet["strategy"] = STRATEGY_ESCALATED
+        if previous and previous.packet.get("specialist_escalation"):
+            packet["specialist_escalation"] = previous.packet["specialist_escalation"]
+        s.add(
+            Run(id=run_id, job_id=job_id, state="waiting_browser", mode="submit", reason="did not advance", packet=packet)
+        )
+        return packet
+
+
+def _exists(service, job_id):
+    with service.db.session() as s:
+        return s.get(Job, job_id) is not None
+
+
+def schedule(service, run_id, config=None, **result):
+    with service.db.session() as s:
+        run = s.get(Run, run_id)
+        result = {
+            "recovery_cause": run.packet["recovery_cause"],
+            "blocker_type": run.packet["blocker_type"],
+            "browser_checkpoint": run.packet["browser_checkpoint"],
+            "reason": "Browser did not advance",
+            **result,
+        }
+        schedule_recovery(s, config or service.config, run, result)
+        escalation = run.packet.get("specialist_escalation")
+    return service.db.get_setting("draft_recovery:" + run.job_id), escalation
+
+
+def test_a_custom_site_runs_in_the_custom_lane_whatever_the_history(service):
+    failed_run(service, "c0", "c0-1")
+    with service.db.session() as s:
+        assert assign_pool(s, s.get(Job, "c0"), s.get(Run, "c0-1")) == CUSTOM
+        assert s.get(Run, "c0-1").packet["worker_pool"] == CUSTOM
+
+
+def test_the_second_failure_of_a_custom_job_escalates_without_leaving_its_lane(service):
+    failed_run(service, "c1", "c1-1")
+    failed_run(service, "c1", "c1-2")
+    recovery, escalation = schedule(service, "c1-2")
+    assert recovery["status"] == "specialist_scheduled" and recovery["scheduled"] is True
+    assert recovery["strategy"] == STRATEGY_ESCALATED and "worker_pool" not in recovery
+    assert escalation["eligible"] is True and escalation["trigger"] == "repeated_failure"
+    assert sorted(escalation["normal_failure_run_ids"]) == ["c1-1", "c1-2"]
+    with service.db.session() as s:
+        job, run = s.get(Job, "c1"), s.get(Run, "c1-2")
+        assert assign_pool(s, job, run) == CUSTOM  # the lane is unchanged
+        assert assign_strategy(job, run) == STRATEGY_ESCALATED
+        assert routed_budget(s, job, "c1-2") == CUSTOM_ESCALATED
+
+
+def test_one_failure_of_a_custom_job_still_retries_normally(service):
+    failed_run(service, "c2", "c2-1")
+    recovery, escalation = schedule(service, "c2-1")
+    assert recovery["status"] == "scheduled" and escalation is None
+
+
+def test_a_stalled_custom_site_escalates_after_one_failure(service):
+    failed_run(service, "c3", "c3-1", cause="navigation_stalled")
+    recovery, escalation = schedule(service, "c3-1")
+    assert recovery["status"] == "specialist_scheduled" and escalation["trigger"] == "stalled"
+
+
+def test_a_custom_site_needs_no_specialist_worker_to_escalate(service):
+    off = service.config.model_copy(update={"specialist_workers": 0})
+    assert handoff_threshold(off, "custom", STUCK) == 2
+    assert handoff_threshold(off, "workday", STUCK) is None  # an ATS job still needs a specialist to move to
+    failed_run(service, "c4", "c4-1")
+    failed_run(service, "c4", "c4-2")
+    recovery, _ = schedule(service, "c4-2", config=off)
+    assert recovery["status"] == "specialist_scheduled"
+
+
+def test_the_escalated_run_is_not_a_standard_failure_and_has_its_own_attempts(service):
+    failed_run(service, "c5", "c5-1")
+    failed_run(service, "c5", "c5-2")
+    schedule(service, "c5-2")
+    failed_run(service, "c5", "c5-3", source="c5-2")  # the escalated attempt, routed as the queue would
+    with service.db.session() as s:
+        assert escalated(s.get(Run, "c5-3")) and not escalated(s.get(Run, "c5-2"))
+        assert specialist_attempts(s, "c5") == 1
+        # It consumed no standard repair, and the standard runs count only when they came from a recovery source.
+        assert automatic_attempts(s, "c5") == 0
+    one = service.config.model_copy(update={"specialist_attempts": 1})
+    recovery, _ = schedule(service, "c5-3", config=one)
+    assert recovery["status"] == "specialist_exhausted" and recovery["scheduled"] is False
+    recovery, _ = schedule(service, "c5-3")
+    assert recovery["status"] == "specialist_scheduled"
+
+
+def test_a_failure_waiting_on_an_email_never_escalates(service):
+    failed_run(service, "c6", "c6-1")
+    failed_run(service, "c6", "c6-2")
+    recovery, escalation = schedule(service, "c6-2", waiting_kind="email")
+    assert escalation is None and recovery["status"] != "specialist_scheduled"
+
+
+def test_an_ats_job_keeps_the_specialist_lane(service):
+    failed_run(service, "w1", "w1-1", ats="workday")
+    failed_run(service, "w1", "w1-2", ats="workday")
+    recovery, escalation = schedule(service, "w1-2")
+    assert recovery["worker_pool"] == SPECIALIST and "strategy" not in recovery
+    with service.db.session() as s:
+        assert assign_pool(s, s.get(Job, "w1"), s.get(Run, "w1-2")) == SPECIALIST
+        assert assign_strategy(s.get(Job, "w1"), s.get(Run, "w1-2")) == STRATEGY_STANDARD
+
+
+def test_the_escalated_custom_budget_is_no_larger_unless_the_owner_raises_it(service):
+    config = service.config.model_copy(update={"max_model_calls": 18})
+    assert pool_boost(config, CUSTOM_ESCALATED) == 1.0
+    assert call_limit(config, 1, CUSTOM_ESCALATED) == 18
+    more = config.model_copy(update={"custom_escalation_multiplier": 1.5})
+    assert call_limit(more, 1, CUSTOM_ESCALATED) == 27 and call_limit(more, 1, CUSTOM) == 18
+    assert budget_class({"worker_pool": CUSTOM, "strategy": STRATEGY_ESCALATED}) == CUSTOM_ESCALATED
+    assert budget_class({"worker_pool": CUSTOM}) == CUSTOM and budget_class({}) == "normal"
+
+
+def test_the_budget_class_is_read_from_the_packet_every_caller_holds(service):
+    # The browser, the model meter, the advice budget and the run timeout all hand it a packet, never a run: reading a
+    # "packet" key inside the packet sized every specialist's budget as a normal run's and dropped its worker context.
+    config = service.config.model_copy(update={"specialist_budget_multiplier": 1.5})
+    assert budget_class({"worker_pool": SPECIALIST}) == SPECIALIST
+    assert pool_boost(config, budget_class({"worker_pool": SPECIALIST})) == 1.5
+    assert budget_class({"worker_pool": CUSTOM}) == CUSTOM
+    assert budget_class({}) == "normal"
+    assert budget_class(None) == "normal"
+
+
+def test_an_escalated_run_is_told_to_stay_on_its_own_posting():
+    # A real run applied to another role after browsing from a career home page (2026-11-01). "A materially different
+    # approach" must not read as permission for that, on either escalated lane; the normal context has no such phrase.
+    for pool in (CUSTOM_ESCALATED, SPECIALIST):
+        text = worker_context("custom", pool)
+        assert "materially different" in text
+        assert "never open, browse to or apply to another posting" in text
+    assert "materially different" not in worker_context("custom", CUSTOM)
+
+
+def test_only_the_recovery_counters_and_the_prompt_read_the_strategy():
+    # What an escalated run may do differently is exactly: its attempt allowance, the failed strategies it is shown, the
+    # sentence above and a budget the owner must raise. Nothing about navigation, controls or commits reads the strategy.
+    from pathlib import Path
+
+    import jobpilot
+
+    root = Path(jobpilot.__file__).parent
+    readers = set()
+    for file in root.rglob("*.py"):
+        text = file.read_text()
+        if any(word in text for word in ("budget_class(", "escalated(", 'get("strategy")', "assign_strategy(", "STRATEGY_ESCALATED")):
+            readers.add(file.relative_to(root).as_posix())
+    assert readers <= {
+        "answer_quality.py",  # the advice call budget (budget_class)
+        "browser.py",  # the time budget and the worker context (budget_class)
+        "control_agent.py",  # its own attempt hash, also named strategy, not this
+        "models.py",  # the model-call budget (budget_class)
+        "pipeline_comparison.py",
+        "recovery.py",
+        "service/execution.py",  # the run timeout (budget_class)
+        "specialist.py",  # the queued event's note
+        "service/queueing.py",
+    }
+
+
+def test_a_posting_guard_stop_never_escalates(service):
+    # A run the posting guard stopped has nothing another run could fix: the site did not open this posting.
+    add_job(service, "j-stop", "custom")
+    failed_run(service, "j-stop", "s1")
+    failed_run(service, "j-stop", "s2", source="s1")
+    result = {
+        "state": "waiting_browser",
+        "reason": "The employer's site didn't open this posting; nothing was sent",
+        "blocker_type": "control_failure",
+        "recoverable": False,
+    }
+    with service.db.session() as s:
+        schedule_recovery(s, service.config, s.get(Run, "s2"), result)
+    with service.db.session() as s:
+        assert s.get(Setting, "draft_recovery:j-stop") is None
+
+
+async def test_two_failures_on_a_custom_site_queue_an_escalated_run_through_the_real_queue(service):
+    """schedule_recovery, then retry_due and Service.queue, with nothing between them replaced: the run that comes out stays in
+    its lane, carries the strategy and the failed ones, and is sized and briefed as an escalated run."""
+    import hashlib
+
+    from jobpilot.db import Resume
+    from jobpilot.recovery import retry_due
+    from jobpilot.specialist import pool_boost
+
+    config = service.config
+    config.mimo_api_key = "no-model"  # The queue wants a model configured; nothing here calls one.
+    (config.data_dir / "resumes").mkdir(exist_ok=True)
+    (config.data_dir / "resumes" / "alex.pdf").write_bytes(b"%PDF-1.4 test")
+    with service.db.exclusive() as s:
+        resume = Resume(name="Alex", filename="alex.pdf", sha256=hashlib.sha256(b"%PDF-1.4 test").hexdigest(), text="Alex Example.")
+        s.add(resume)
+        s.flush()
+        resume_id = resume.id
+    service.db.set_setting("profile", {"name": "Alex Example", "email": "alex@example.test", "autonomous": True,
+                                       "facts": {"first_name": "Alex", "last_name": "Example"}})
+    service.db.set_setting("control", {"paused": False, "auto_submit": True})
+
+    async def dispatch(_run_id):
+        pass
+
+    service.dispatch = dispatch
+    failed_run(service, "esc", "r1")
+    failed_run(service, "esc", "r2", source="r1")
+    with service.db.exclusive() as s:
+        for rid in ("r1", "r2"):
+            s.get(Run, rid).resume_id = resume_id
+        s.get(Run, "r1").created_at, s.get(Run, "r2").created_at = "2026-11-01T01:00:00+00:00", "2026-11-01T02:00:00+00:00"
+    schedule(service, "r1")
+    saved, escalation = schedule(service, "r2")
+    assert saved["scheduled"] is True and saved["strategy"] == STRATEGY_ESCALATED and "worker_pool" not in saved
+    queued = await retry_due(service)
+    assert queued, service.db.get_setting("draft_recovery:esc").get("queue_outcome")
+    with service.db.session() as s:
+        run = s.get(Run, queued[0]["id"] if isinstance(queued[0], dict) else queued[0])
+        packet = dict(run.packet)
+    assert packet["worker_pool"] == CUSTOM and packet["strategy"] == STRATEGY_ESCALATED
+    assert packet["source_run_id"] == "r2"
+    assert packet["specialist_escalation"]["safe_failed_strategies"] == escalation["safe_failed_strategies"]
+    assert budget_class(packet) == CUSTOM_ESCALATED and pool_boost(config, budget_class(packet)) == 1.0
+    assert "never open, browse to or apply to another posting" in worker_context("custom", budget_class(packet))
+    with service.db.session() as s:
+        assert specialist_attempts(s, "esc") == 1 and automatic_attempts(s, "esc") == 0  # its own allowance, not a standard retry
+
+
+def test_the_queued_event_names_the_custom_escalation():
+    note = routing_note(
+        CUSTOM,
+        CUSTOM,
+        {"specialist_escalation": {"trigger": "repeated_failure", "normal_failure_run_ids": ["a", "b"], "cause": STUCK}},
+        STRATEGY_ESCALATED,
+    )
+    assert note == {
+        "pool": CUSTOM,
+        "strategy": "escalated",
+        "specialist_trigger": "repeated_failure",
+        "after_failures": 2,
+        "failure_cause": STUCK,
+    }
+    assert routing_note(CUSTOM, CUSTOM, None) == {"pool": CUSTOM}

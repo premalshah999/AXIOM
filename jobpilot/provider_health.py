@@ -187,6 +187,7 @@ def status(db, config):
         "provider": config.llm_provider,
         "model": config.llm_model,
         "state": state,
+        "has_key": bool(config.llm_api_key),
         "retry_at": datetime.fromtimestamp(retry, UTC).isoformat() if retry else None,
         "last_error": value.get("last_error"),
     }
@@ -215,6 +216,16 @@ def account_reason(db, config):
     return None
 
 
+def _spent_today(db, config):
+    from zoneinfo import ZoneInfo
+
+    from .db import Budget
+
+    with db.session() as s:
+        budget = s.get(Budget, datetime.now(ZoneInfo(config.timezone)).date().isoformat())
+        return budget.spent if budget else 0
+
+
 def dispatch_gate(db, config):
     """Whether, and how widely, new work may start: the model's cooldown first, then the host (host_health.check)."""
     chosen = selected(db, config).values()
@@ -232,6 +243,10 @@ def dispatch_gate(db, config):
                 else "The selected model is cooling down after failed requests; saved work is retained"
             ),
         )
+    # Today's AI spending limit is used: every model call would be refused, so a new start would end at its first question with its
+    # attempt spent ("Model budget is exhausted") and nothing retries that by itself.
+    if (limit := getattr(config, "daily_budget_usd", None)) is not None and _spent_today(db, config) >= limit:
+        return host_health.Gate(0, "ai_budget", f"Today's AI spending limit of ${limit:g} is used")
     # HTTP acquire() already allows exactly one productive recovery request.
     # A browser can spend time on local fields/mail before needing the model;
     # reducing the entire application pool to that browser stalls the others.

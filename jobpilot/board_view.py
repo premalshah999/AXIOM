@@ -4,8 +4,9 @@ is confusing ... make the job board good and legit"; 2026-10-30: "too sketchy an
 Every row is one posting: a real title and company, its place, the date the employer or a list gave (or plainly "found"), where it
 came from, the employer's own link, and one line saying why it fits or doesn't. Listings come from the same read the dispatcher
 uses (jobboard.board_snapshot: active, in the US, inside the window, seen lately), and what will happen to a row comes from the same
-reading and plan (startable.py, queue_order.py), so In queue #4 here is number 4 on the Queue. Left out for good: a blank title or
-company, a closed or aged-out posting, a general careers page, one already applied to. The same posting under two links is one row.
+reading and plan (startable.py, queue_order.py), so In queue #4 here is number 4 on the Queue. Left out for good: a blank title, a
+closed or aged-out posting, a general careers page, one already applied to. The same posting under two links is one row. A posting
+whose employer is not known yet says "Company not listed" (board_names.py), and an internal id never reaches a row.
 """
 
 import re
@@ -13,6 +14,7 @@ import logging
 import threading
 import time
 from datetime import UTC, datetime, timedelta
+from urllib.parse import urlsplit
 
 from sqlalchemy import func, select
 
@@ -36,7 +38,7 @@ REMOTE = re.compile(r"\bremote\b|\bwork from home\b|\banywhere\b", re.I)
 _CITIES = {"san francisco": "CA", "new york": "NY", "seattle": "WA", "boston": "MA", "chicago": "IL", "austin": "TX", "los angeles": "CA", "san jose": "CA", "palo alto": "CA", "denver": "CO", "atlanta": "GA"}
 
 POSTED = {"1": ("Last 24 hours", 24), "3": ("Last 3 days", 72), "7": ("Last 7 days", 168), "30": ("Last 30 days", 720)}
-FITS = {"match": "Good fits", "other": "Not a fit", "all": "Everything found"}
+FITS = {"match": "Good matches", "other": "Not a match", "all": "Everything found"}
 SORTS = ("fit", "newest", "company")
 TTL = 15  # seconds the cleaned board is reused: it is read per poll, and the listings change on the scale of hours
 
@@ -82,9 +84,28 @@ def dated(job):
     return bool(basis) and "inferred" not in basis and basis != "added"
 
 
+# What one source adds to a title that another leaves out: "New Grad 2027:", "(Early Career)", a dash spelt two ways. A year stays unless it
+# belongs to the new-grad label, since "Summer 2026" and "Summer 2027" are different postings.
+_LABELS = re.compile(
+    r"\b20\d\d\s+(?:new\s+)?(?:(?:college|university)\s+)?grad\w*|"
+    r"\b(?:(?:new|recent)\s+)?(?:(?:college|university)\s+)?grad(?:uate)?s?\b(?:\s*,?\s*(?:class of\s*)?20\d\d)?|"
+    r"\bearly[- ]career\b|\bentry[- ]level\b",
+    re.I,
+)
+
+
+def title_key(title):
+    """A title as every source spells it the same: without the new-grad label, case, punctuation and word breaks."""
+    text = _LABELS.sub(" ", str(title or "").casefold())
+    return " ".join(re.findall(r"[a-z0-9+#]+", text))
+
+
 def key_of(job):
-    """One posting whatever link it came under: the employer, the title and the place."""
-    return tuple(" ".join((job.get(k) or "").casefold().split()) for k in ("company", "title", "location"))
+    """One posting whatever link or list it came under: the employer, the title without its labels, and the place."""
+    company, location = (" ".join((job.get(k) or "").casefold().split()) for k in ("company", "location"))
+    if company == "company not listed":
+        company = urlsplit(job.get("url") or "").hostname or company  # Two employers without a name are not one employer.
+    return company, title_key(job.get("title")) or " ".join((job.get("title") or "").casefold().split()), location
 
 
 def _restricted(reason):
@@ -121,13 +142,15 @@ def levels_of(db, listed):
 
 def collect(service):
     """Every row the board can show, cleaned and classified, with what will happen to each. Reads on a worker thread."""
-    from .jobboard import LOCKED, board_snapshot, settings as board_settings
+    from .board_names import NOT_LISTED
+    from .jobboard import LOCKED, board_snapshot, settings as board_settings, us_places
+    from .posting_identity import placeholder_company
     from .queue_order import plans
     from .schemas import Profile
     from .service.queueing import fit_blocker
     from .shortlinks import is_shortlink
     from .startable import reading
-    from .features.discovery.roles import role_fits
+    from .features.discovery.roles import fitting_roles
 
     db = service.db
     value = reading(service).get(service)
@@ -178,9 +201,11 @@ def collect(service):
             hidden["closed"] += 1
             continue
         title, company = " ".join((job.get("title") or "").split()), " ".join((job.get("company") or "").split())
-        if not title or not company:
+        if not title:
             hidden["blank"] += 1
             continue
+        # A real posting whose employer is not known yet: the row says so, and read_blank_titles reads it from the posting.
+        company = NOT_LISTED if placeholder_company(company, job["url"]) else company
         hold = holds.get(jid)
         code = (hold or {}).get("code", "")
         if code in {"aged", "protected"} or (code == "gate" and "general careers page" in hold["reason"]) or (code == "gate" and "closed" in hold["reason"]):
@@ -207,9 +232,9 @@ def collect(service):
             state, fit, sentence = "ready", "match", _line(reason, source)
         roles = roles_memo.get(title)
         if roles is None:
-            roles = roles_memo[title] = [role for role in profile.target_roles if role_fits(title, [role])]
+            roles = roles_memo[title] = fitting_roles(title, profile.target_roles)
         row = {
-            "id": jid, "title": title, "company": company, "location": " ".join((job.get("location") or "").split()), "url": job["url"], "ats": job.get("ats") or "",
+            "id": jid, "title": title, "company": company, "location": " ".join(us_places(job.get("location")).split()), "url": job["url"], "ats": job.get("ats") or "",
             "posted_at": job.get("posted_at") or job.get("created_at") or "", "dated": dated(job), "source": source,
             "score": None if restricted and not job.get("score") else job.get("score"),
             "state": state, "fit": fit, "line": sentence[:400], "position": positions.get(jid), "approval": ("over" if code == "employer_limit" else "reserved") if state == "approval" else "",
@@ -235,9 +260,29 @@ def collect(service):
     sites = [row for row in out.values() if is_company_site(row["ats"])]
     at = datetime.now(UTC)
     window = at - timedelta(hours=cfg.max_age_hours)
-    with db.session() as s:
-        from .db import Setting
+    # A job in line keeps its row whatever its age, so the header's words about age can name them.
+    longest = (at - timedelta(hours=max(cfg.max_age_hours, cfg.window_hours("greenhouse")))).isoformat()
+    in_line_older = sum(1 for row in rows if row["position"] is not None and row["posted_at"] < longest)
+    return {
+        "rows": rows,
+        "sites": sites,
+        "hidden": hidden,
+        "in_queue": len(positions),
+        "enabled": cfg.enabled,
+        "window": cfg.max_age_hours,
+        "live_window": cfg.window_hours("greenhouse"),
+        "in_line_older": in_line_older,
+        "oldest": window.isoformat(),
+    }
 
+
+def scan_state(db):
+    """How the search stands: read per request, not kept with the cleaned board, or Search now answered "Searching 667 boards" while the
+    page said nothing for up to half a minute and its progress moved in jumps of that size."""
+    from .db import Setting
+
+    at = datetime.now(UTC)
+    with db.session() as s:
         started = s.scalar(
             select(func.max(Setting.value["started_at"].as_string())).where(Setting.key.startswith("job_board_scan:", autoescape=True))
         )
@@ -260,18 +305,46 @@ def collect(service):
             ) or 0
     requested = db.get_setting("job_board_requested", {}).get("at")
     return {
-        "rows": rows,
-        "sites": sites,
-        "hidden": hidden,
         "searched_at": max(filter(None, (started, requested)), default=None),
         "scanning": scanning or 0,
         "scan_read": read,
         "scan_total": total,
-        "enabled": cfg.enabled,
-        "window": cfg.max_age_hours,
-        "live_window": cfg.window_hours("greenhouse"),
-        "oldest": window.isoformat(),
     }
+
+
+def with_holds(value, service, positions):
+    """The board as a change to the reserved list leaves it: each row's reservation, and what follows from it, without cleaning the board
+    again. A row in line stays in line. A row released takes the state its job's status gives until the next read."""
+    from .db import Job
+    from .reserved import held, matcher
+
+    db = service.db
+    with db.session() as s:
+        holding, reserving = set(held(s)), matcher(s)
+        released = [r["id"] for rows in (value["rows"], value["sites"]) for r in rows if r["approval"] == "reserved" and r["id"] not in holding]
+        jobs = {row.id: row for row in s.execute(select(Job.id, Job.status, Job.reason).where(Job.id.in_(released)))} if released else {}
+
+    def changed(row):
+        found = reserving(row["company"], row["url"])
+        new = {**row, "reserved": found.employer if found else ""}
+        if row["id"] in positions:
+            return new
+        if row["id"] in holding:
+            return {**new, "state": "approval", "fit": "match", "position": None, "approval": "reserved", "can_add": False,
+                    "line": "A reserved employer: nothing is applied there until you approve this job."}
+        job = jobs.get(row["id"])
+        if job is None:
+            return new
+        restricted = _restricted(job.reason)
+        if job.status == "skipped":
+            state, fit, sentence = "below", "other", _line(job.reason, row["source"]) or "Below your minimum fit."
+        elif job.status == "new":
+            state, fit, sentence = "checking", "match", "Found, and still being checked against your profile."
+        else:
+            state, fit, sentence = "ready", "match", _line(job.reason, row["source"])
+        return {**new, "state": state, "fit": fit, "line": sentence[:400], "approval": "", "can_add": not restricted}
+
+    return {**value, "rows": [changed(r) for r in value["rows"]], "sites": [changed(r) for r in value["sites"]]}
 
 
 class Board:
@@ -279,13 +352,23 @@ class Board:
 
     def __init__(self):
         self.value, self.at, self.busy = None, 0.0, threading.Lock()
+        self.failed = False
+        self.changes = 0  # counts changes to the reserved list: a board read begun before the last one is out of date when it ends
+
+    def _store(self, service):
+        changes = self.changes
+        value = collect(service)
+        if changes == self.changes or self.value is None:
+            self.value, self.at = value, time.monotonic()
 
     def _fill(self, service):
         try:
-            self.value, self.at = collect(service), time.monotonic()
+            self._store(service)
+            self.failed = False
         except Exception:
             # Said, not swallowed: a read that always failed left a fresh install on a loading screen for good (2026-11-01).
             logging.getLogger(__name__).exception("The job board could not be read")
+            self.failed = True  # the page says so when it has nothing else to show
             self.at = time.monotonic() - TTL / 2  # try again shortly; keep serving the last board
         finally:
             self.busy.release()
@@ -303,13 +386,55 @@ class Board:
     def reload(self, service):
         """Clean the board again now, on the calling thread (the user changed what holds a job)."""
         with self.busy:
-            self.value, self.at = collect(service), time.monotonic()
+            self._store(service)
+
+    def holds_changed(self, service, positions=()):
+        """The reserved list changed: say so on the rows already read, at once, and leave cleaning the board to the read that follows."""
+        self.changes += 1
+        if self.value is not None:
+            self.value = with_holds(self.value, service, positions)
 
 
 def board(service):
     if not hasattr(service, "board_view"):
         service.board_view = Board()
     return service.board_view
+
+
+LOGO_AHEAD = 150  # Companies whose icons are looked up before anyone scrolls to them: the first pages of the default order.
+
+
+def companies_to_warm(service, limit=LOGO_AHEAD):
+    """The companies of the best-ranked open postings, once each, in the order a person meets them. An icon is looked up only
+    after a page asks for it, two companies at a time, so a page of 25 filled its letters with logos over a minute and the next
+    page started over: 336 of 1,012 companies on the board had one (2026-11-02)."""
+    data = board(service).value
+    if not data:
+        return []
+    ranked = sorted((row for row in data["rows"] if row["fit"] == "match"), key=lambda r: (-(r["score"] if r["score"] is not None else -1), r["id"]))
+    return list(dict.fromkeys(row["company"] for row in ranked if row["company"] != "Company not listed"))[:limit]
+
+
+def warm_logos(service, companies):
+    """Queue the icons of these companies for the background lookup (logos.Shelf): never waits on the network. Runs on the event loop."""
+    from .db import Job
+    from .logos import shelf
+
+    if not service.config.company_logos or not companies:
+        return 0
+
+    def postings(company):
+        with service.db.session() as s:
+            rows = s.execute(select(Job.url, Job.description).where(Job.company == company).order_by(Job.created_at.desc()).limit(6)).all()
+        return [(u, (d or "")[:20_000]) for u, d in rows]
+
+    kept = shelf(service.config.data_dir)
+    if not kept.scanned:
+        kept.scan()
+    before = len(kept.waiting)
+    for company in companies:
+        kept.request(company, postings)
+    return len(kept.waiting) - before
 
 
 PER_COMPANY = 3  # rows one company shows before "N more at X": one employer posting hundreds of roles filled the first pages
@@ -324,11 +449,12 @@ def page(service, q="", role="all", company="all", place="all", posted="all", pl
     Grouped (the default, while no company is chosen) a company shows its best PER_COMPANY rows in the order asked for, the last
     carrying `more`: how many it hides. Every count here, the total and each filter's, is of the rows shown, so a filter's number is
     the number of rows it opens; choosing the company shows them all and the company filter counts all of them."""
-    data = board(service).ready(service)
+    shelf = board(service)
+    data = shelf.ready(service)
     if data is None:
         return {
-            "planning": True, "rows": [], "total": 0, "page": 1, "pages": 1, "size": size, "all": 0, "sites": 0, "section": section, "hidden": {}, "searched_at": None, "scanning": 0, "scan_read": 0, "scan_total": 0,
-            "enabled": True, "window": 720, "selectable": 0, "ids": [], "facets": dict.fromkeys(("fit", "role", "company", "place", "platform", "posted", "level"), []),
+            "planning": not shelf.failed, "failed": shelf.failed, "rows": [], "total": 0, "page": 1, "pages": 1, "size": size, "all": 0, "main": 0, "sites": 0, "in_queue": 0, "section": section, "hidden": {}, "searched_at": None, "scanning": 0, "scan_read": 0, "scan_total": 0,
+            "enabled": True, "window": 720, "live_window": 720, "selectable": 0, "ids": [], "facets": dict.fromkeys(("fit", "role", "company", "place", "platform", "posted", "level"), []),
         }
     rows = data["sites"] if section == "sites" else data["rows"]
     text = " ".join((q or "").casefold().split())
@@ -416,17 +542,18 @@ def page(service, q="", role="all", company="all", place="all", posted="all", pl
         **answer,
         "selectable": sum(1 for row in shown if actionable(row)),
         "all": len(rows),
+        "main": len(data["rows"]),
         "sites": len(data["sites"]),
+        "in_queue": data["in_queue"],
         "section": section,
         "grouped": grouped,
         "per_company": PER_COMPANY,
         "hidden": data["hidden"],
-        "searched_at": data["searched_at"],
-        "scanning": data["scanning"],
-        "scan_read": data["scan_read"],
-        "scan_total": data["scan_total"],
+        **scan_state(service.db),
         "enabled": data["enabled"],
         "window": data["window"],
+        "live_window": data["live_window"],
+        "in_line_older": data["in_line_older"],
         "facets": {
             "fit": [{"value": k, "label": FITS[k], "count": shown_count("fit", lambda r: k == "all" or r["fit"] == k)} for k in FITS],
             "role": [{"value": k, "label": k, "count": n} for k, n in by_count(facet("role", lambda r: r["roles"]))],

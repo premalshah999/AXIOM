@@ -1,5 +1,5 @@
 import { lazy, Suspense, useMemo, useState } from "react";
-import { Copy, ExternalLink } from "lucide-react";
+import { Copy, Download, ExternalLink } from "lucide-react";
 import { api } from "./api";
 import { useWorkspace } from "./context";
 import { useAction, useDraft, usePoll } from "./hooks";
@@ -15,7 +15,7 @@ import {
 import { groupQuestions, QuestionCard } from "./questions";
 import { SteerPanel, TakeOverButton } from "./steer";
 import type { Detail, Hold, Job, JobPosting, JobRequest, QueuePlace, Reserved, Run, Snapshot } from "./types";
-import { ago, day, jobWords, plainReason, platformName, plural, seconds, shortId, shownFit, stamp, words } from "./format";
+import { ago, jobWords, plainError, plainReason, platformName, plural, seconds, shortId, shownFit, stamp } from "./format";
 import { Button, Drawer, Monogram, Panel, Select, Skeleton, Textarea } from "./ui/index";
 import { Facts, Notice, StatusPill } from "./worktools";
 
@@ -106,7 +106,7 @@ export function JobPanel({
         ) : (
           <p className="ax-note">This job isn't in the current list (it may be archived or older history). Its recorded attempt is shown below.</p>
         )}
-        {!workspaceRow && historical.error && <Notice tone="bad">{historical.error.message}</Notice>}
+        {!workspaceRow && historical.error && <Notice tone="bad">{plainError(historical.error.message)}</Notice>}
         {selectedRun ? (
           <RunSection key={selectedRun} runId={selectedRun} row={row} runs={runs} latest={latest} actions={actions} outlook={outlook.data} />
         ) : (
@@ -141,7 +141,7 @@ function JobSummary({ row, posting }: { row: JobRow; posting?: JobPosting | null
       {posting?.source && <span>{posting.source}</span>}
       {shownFit(job) != null && (
         <span>
-          Fit <span className="mono">{shownFit(job)}</span>
+          Match <span className="mono">{shownFit(job)}</span>
         </span>
       )}
       <a className="ax-more-link" href={posting?.link || job.url} target="_blank" rel="noreferrer noopener">
@@ -199,17 +199,33 @@ function nextStep(state: string, paused: boolean, place?: QueuePlace | null, hol
 
 /** The status first, in words, with what to do next inside it. */
 function StatusBlock({ state, reason, earlier, hold, place, next, children }: { state: string; reason?: string; earlier?: string; hold?: Hold | null; place?: QueuePlace | null; next?: string; children?: React.ReactNode }) {
-  const { snapshot } = useWorkspace();
+  const { snapshot, go } = useWorkspace();
   const info = stateInfo(state);
+  // A job with a place in line reads In queue; a Ready one without one is not in it, whatever the lists call Ready.
+  const word = place || state === "pending:waiting" ? "In queue" : state === "job:ready" ? "Not queued" : undefined;
+  // What it waits for, said once: "as soon as a worker is free" twice around "this one starts when that one ends" read as three answers.
+  const waitingFor = state === "pending:waiting" && !!reason;
   return (
     <section className="dr-status" aria-label="Status">
       {earlier && <p className="ax-note">Earlier attempt, {earlier}</p>}
       <p className="dr-status-word">
-        {hold ? <StatusPill state={state} label={hold.label ?? "Held"} tone="hold" /> : <StatusPill state={state} />}
+        {hold ? <StatusPill state={state} label={hold.label ?? "Held"} tone="hold" /> : <StatusPill state={state} label={word} />}
       </p>
-      {(hold ? hold.reason : info.explain) && <p className="dr-status-why">{hold ? hold.reason : info.explain}</p>}
+      {(hold ? hold.reason : !waitingFor && info.explain) && <p className="dr-status-why">{hold ? plainReason(hold.reason) : info.explain}</p>}
       {!hold && reason && <p className="dr-status-reason">{reason}</p>}
-      {!earlier && <p className="dr-next">{next || nextStep(state, snapshot.control.paused, place, hold, snapshot.config.apply_mode)}</p>}
+      {!earlier && (!waitingFor || !!next || !!place) && (
+        <p className="dr-next">
+          {next || nextStep(state, snapshot.control.paused, place, hold, snapshot.config.apply_mode)}
+          {place && (
+            <>
+              {" "}
+              <button type="button" className="ax-link" onClick={() => go({ view: "queue" })}>
+                Open the queue
+              </button>
+            </>
+          )}
+        </p>
+      )}
       {children}
     </section>
   );
@@ -260,7 +276,7 @@ function RunSection({
           ))}
         {actions}
         {row && latest && <SteerPanel jobId={row.job.id} />}
-        {row && latest && ["needs", "repair"].includes(stateInfo(state).group) && (
+        {row && latest && row.job.status !== "archived" && ["needs", "repair"].includes(stateInfo(state).group) && (
           <div className="ax-toolbar">
             <TakeOverButton jobId={row.job.id} />
           </div>
@@ -277,7 +293,7 @@ function RunSection({
             </Button>
           }
         >
-          {detail.error.message}
+          {plainError(detail.error.message)}
         </Notice>
       )}
       {!detail.data && !detail.error && <Skeleton rows={3} mono={false} />}
@@ -390,18 +406,17 @@ function DetailBody({ detail, state, runs, runId, open }: { detail: Detail; stat
   const verified = answers.filter((a) => a.verified).length;
   const receipt = run.receipt || {};
   const lines = receiptLines(receipt);
-  // A report from before 2026-11-01 may hold the engine's empty finding ("does not establish a more specific cause", "browser
-  // trace"), which told someone new nothing and sounded like a job for them.
-  const cause = report?.likely_cause && !/does not establish a more specific cause/.test(report.likely_cause) ? report.likely_cause : "";
-  const steps = (report?.next_steps || []).filter((s) => !/browser trace/.test(s));
-  const reportSays = !!report && (report.summary !== run.reason || !!cause || steps.length > 0);
+  // The server sends a report in plain words (vocabulary.plain_report): its summary only when it adds to the reason above.
+  const cause = report?.likely_cause || "";
+  const steps = report?.next_steps || [];
+  const reportSays = !!report && (!!report.summary || !!cause || steps.length > 0);
   return (
     <>
       {/* The status above already says what a question or the attempt's own reason says; the report adds the cause and next steps. */}
       {report && stateInfo(state).group !== "needs" && reportSays && (
         <Panel title="What stopped this attempt">
           <div className="dr-stack">
-            {report.summary !== run.reason && <p>{report.summary}</p>}
+            {report.summary && <p>{report.summary}</p>}
             {cause && <p className="ax-note">{cause}</p>}
             {steps.length > 0 && (
               <ul className="ax-rows">
@@ -484,18 +499,17 @@ function DetailBody({ detail, state, runs, runId, open }: { detail: Detail; stat
       </details>
       <details className="ax-fold">
         <summary>
-          Activity <span className="ax-note">{plural(detail.events.length, "event")}</span>
+          Activity <span className="ax-note">{plural(detail.activity.length, "step")}</span>
         </summary>
-        {detail.events.length ? (
+        {detail.activity.length ? (
           <Facts
-            items={detail.events.map((e): [React.ReactNode, React.ReactNode] => [
+            items={detail.activity.map((e): [React.ReactNode, React.ReactNode] => [
               <time dateTime={e.created_at}>{stamp(e.created_at)}</time>,
-              // The message says it; the event's own kind ("settle timing", "phase timing") is engine vocabulary and only a hint.
-              <span title={words(e.kind)}>{e.message}</span>,
+              <span>{e.message}</span>,
             ])}
           />
         ) : (
-          <p className="ax-note">No events recorded yet.</p>
+          <p className="ax-note">Nothing recorded yet.</p>
         )}
       </details>
       <details className="ax-fold">
@@ -510,18 +524,12 @@ function DetailBody({ detail, state, runs, runId, open }: { detail: Detail; stat
               ["Attempt ID", <span className="mono">{shortId(run.id)}</span>],
             ]}
           />
-          {Object.keys(receipt).length > 0 && (
-            <details className="ax-fold">
-              <summary>Raw receipt</summary>
-              <pre>{JSON.stringify(receipt, null, 2)}</pre>
-            </details>
-          )}
-          {report && (
-            <details className="ax-fold">
-              <summary>Diagnostic evidence</summary>
-              <pre>{JSON.stringify(report.evidence, null, 2)}</pre>
-            </details>
-          )}
+          {/* The engine's own record, in its own words, for reporting a problem: a file to send, not something to read here. */}
+          <div>
+            <a className="ax-btn is-sm" href={`/api/runs/${run.id}/record`} download>
+              <Download size={13} aria-hidden="true" /> Download this attempt's record
+            </a>
+          </div>
         </div>
       </details>
     </>
@@ -567,7 +575,7 @@ function NotStarted({ row, actions, hold, place }: { row: JobRow; actions: React
       state={row.state}
       hold={row.state === "job:ready" ? hold : undefined}
       place={place}
-      reason={plainReason(row.state === "pending:waiting" && row.request?.reason ? row.request.reason : job.reason)}
+      reason={plainReason(row.state === "pending:waiting" && row.request?.reason ? row.request.reason : job.reason, "")}
     >
       {actions}
     </StatusBlock>

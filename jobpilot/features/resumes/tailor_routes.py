@@ -66,7 +66,7 @@ def _job(db, job_id):
         resume = s.get(Resume, rid) if rid else None
         resume = resume or s.scalar(select(Resume).where(Resume.demo.is_(False)).order_by(Resume.created_at.desc()).limit(1))
         return (
-            {"id": job.id, "company": job.company, "title": job.title, "location": job.location, "url": job.url, "description": job.description or "", "status": job.status},
+            {"id": job.id, "company": job.company, "title": job.title, "location": job.location, "url": job.url, "description": job.description or "", "status": job.status, "resume_id": job.resume_id},
             (resume.text or "") if resume else "",
             resume.name if resume else None,
         )
@@ -139,10 +139,11 @@ def view(db, config, job_id: str) -> dict:
             "approved_how": row.approved_how,
         }
         rule_problems = ((failed.validation or {}).get("rules") or {}).get("problems", []) if failed else []
+        failure = choice.plain_failure(row.error, rule_problems) if row and row.state == "failed" else None
     source_doc = editor.ResumeDoc.model_validate(v["source_doc"]) if v.get("source_doc") else None
     doc = editor.ResumeDoc.model_validate(v["editor"]["doc"]) if v.get("editor", {}).get("doc") else None
     inv, evidence_text = _evidence_text(profile, resume_text, source_doc)
-    terms = v.get("ats_terms") or ats.terms(job["description"], job["title"], supported_terms(inv))
+    terms = v.get("ats_terms") or ats.terms(job["description"], job["title"], supported_terms(inv), company=job.get("company", ""))
     source_text = doc_plain(source_doc) if source_doc else resume_text
     now_text = doc_plain(doc) if doc else source_text
     master = current_master(db, approved_only=True)
@@ -164,6 +165,9 @@ def view(db, config, job_id: str) -> dict:
         "rules": v.get("rules"),
         "preview_rules": v.get("preview_rules") or v.get("rules"),
         "rule_problems": rule_problems,
+        "failure": failure,
+        "started": job["status"] in choice.STARTED,
+        "in_line": db.get_setting("owner_apply:" + job_id) is not None,
         "parse": v.get("parse"),
         "quality": v.get("quality"),
         "report": v.get("report") or {},
@@ -179,6 +183,7 @@ def view(db, config, job_id: str) -> dict:
 class _JobLike:
     def __init__(self, job):
         self.description = job["description"]
+        self.resume_id = job["resume_id"]
 
 
 def editor_rules(db, data, pdf: bytes) -> dict:
@@ -256,8 +261,10 @@ def add(r, service) -> None:
         return {"choices": done}
 
     @r.get("/tailor/job/{job_id}")
-    def tailor_job(job_id: str):
-        return view(db, config, job_id)
+    async def tailor_job(job_id: str):
+        if await asyncio.to_thread(choice.reclaim, db, job_id):
+            choice.start(db, config, job_id)
+        return await asyncio.to_thread(view, db, config, job_id)
 
     @r.put("/tailor/job/{job_id}")
     async def choose_for_job(job_id: str, data: ChoiceInput):
@@ -274,10 +281,15 @@ def add(r, service) -> None:
     @r.post("/tailor/job/{job_id}/retry")
     async def retry(job_id: str):
         """Tailor this job again from the source, setting aside what's there. A new version needs a new review."""
+        from ...db import Job
+
         with db.exclusive() as s:
             row = s.get(RsTailorChoice, job_id)
             if row is None:
                 raise HTTPException(404, "This job isn't set to a tailored resume")
+            job = s.get(Job, job_id)
+            if job is not None and job.status in choice.STARTED:
+                raise HTTPException(409, choice.ALREADY_STARTED)
             row.state, row.error, row.artifact_id, row.lease_until = "preparing", {}, None, choice.lease()
             row.approved_artifact_id = row.approved_sha = row.approved_at = row.approved_how = None
         choice.start(db, config, job_id, fresh=True)
@@ -286,7 +298,12 @@ def add(r, service) -> None:
     @r.post("/tailor/job/{job_id}/save")
     async def save(job_id: str, data: SaveInput):
         """The applicant's edit, compiled and checked, becomes a new immutable version. Anything already approved no longer is."""
+        from ...db import Job
+
         with db.session() as s:
+            started = s.get(Job, job_id)
+            if started is not None and started.status in choice.STARTED:
+                raise HTTPException(409, choice.ALREADY_STARTED)
             row = s.get(RsTailorChoice, job_id)
             base = s.get(RsArtifact, row.artifact_id) if row and row.artifact_id else None
             if base is None or base.status != "ready":
@@ -334,12 +351,14 @@ def add(r, service) -> None:
             return JSONResponse({"detail": preview_rules["problems"][0]["message"], "problems": preview_rules["problems"], "warnings": preview_rules["warnings"]}, status_code=422)
         parsed = parse_check(compiled.pdf, data.doc)
         if not parsed["ok"]:
-            raise HTTPException(422, "The edited PDF failed its ATS extraction checks.")
+            failed = "; ".join(i["label"] for i in parsed["items"] if not i["ok"])
+            raise HTTPException(422, f"This version wouldn't read cleanly in an employer's system, so it wasn't saved. What didn't read: {failed}.")
         terms = v.get("ats_terms") or []
         from . import gates
+        from .normal import forbidden_terms
 
-        # A term nothing supports, which they typed themselves. It stays, because it's their resume, and they're told plainly.
-        typed = ats.adds_forbidden(doc_plain(data.doc), evidence_text, ats.forbidden(ats.score(terms, doc_plain(source), evidence_text)))
+        # A term nothing supports, which they typed themselves. It stays, because it's their resume, and they're told plainly. A term their own bullet already says in other words isn't one.
+        typed = ats.adds_forbidden(doc_plain(data.doc), evidence_text, forbidden_terms(ats.score(terms, doc_plain(source), evidence_text), source))
         if typed:
             rules["warnings"].append({"code": "your_statement", "where": "resume", "message": "Nothing else you've given AXIOM says you have: " + ", ".join(typed[:8]) + ". Keep it only if it's true."})
 
@@ -429,7 +448,7 @@ def add(r, service) -> None:
         job, resume_text, _ = _job(db, data.job_id)
         profile = db.get_setting("profile", {}) or {}
         inv, evidence_text = _evidence_text(profile, resume_text)
-        terms = ats.terms(job["description"], job["title"], supported_terms(inv))
+        terms = ats.terms(job["description"], job["title"], supported_terms(inv), company=job.get("company", ""))
         with db.session() as s:
             row = s.get(RsTailorChoice, data.job_id)
             base = s.get(RsArtifact, row.artifact_id) if row and row.artifact_id else None

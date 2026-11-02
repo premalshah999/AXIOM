@@ -1,5 +1,7 @@
 """HTTP contract of the job-board routes: snapshot, settings, managed sources, scans, selection, unattended batch."""
 
+import pytest
+
 from jobpilot.db import Source
 
 SOURCE = {"name": "Acme Example", "kind": "greenhouse", "url": "https://boards.example.test/acme"}
@@ -45,6 +47,30 @@ def test_board_settings_are_saved_and_visible_in_the_snapshot(client):
     assert saved.status_code == 200 and saved.json()["saved"] is True
     settings = client.get("/api/snapshot", params={"include_sources": "false"}).json()["discovery_settings"]
     assert settings["interval_hours"] == 6 and settings["early_career_only"] is True
+
+
+def test_how_close_a_match_is_one_number_on_both_screens(client, service):
+    """Settings › Applying and Profile › Job preferences both show "How close a match": saving either moves the other."""
+    service.db.set_setting("profile", {"minimum_fit": 70})
+    assert client.put("/api/job-board/settings", json={"minimum_auto_fit": 55}).status_code == 200
+    assert service.db.get_setting("profile", {})["minimum_fit"] == 55
+    # Saving the board form with the same number leaves a profile that was set apart alone.
+    service.db.set_setting("profile", {"minimum_fit": 40})
+    assert client.put("/api/job-board/settings", json={"minimum_auto_fit": 55, "interval_hours": 6}).status_code == 200
+    assert service.db.get_setting("profile", {})["minimum_fit"] == 40
+
+
+def test_how_close_a_match_reaches_a_profile_not_saved_yet(client, service):
+    """A new install has no profile: the number set in Settings is what Profile shows, and the first profile save keeps it."""
+    assert service.db.get_setting("profile", None) is None
+    assert client.put("/api/job-board/settings", json={"minimum_auto_fit": 55}).status_code == 200
+    profile = client.get("/api/profile").json()
+    assert profile["minimum_fit"] == 55
+    assert client.put("/api/profile", json=profile).status_code == 200
+    assert client.get("/api/job-board").json()["settings"]["minimum_auto_fit"] == 55
+    # And the way back: the profile moves the board.
+    assert client.put("/api/profile", json={**profile, "minimum_fit": 65}).status_code == 200
+    assert client.get("/api/job-board").json()["settings"]["minimum_auto_fit"] == 65
 
 
 def test_board_settings_reject_an_interval_outside_the_choices(client):
@@ -100,3 +126,22 @@ def test_a_board_is_added_from_a_link_alone_and_a_posting_link_becomes_its_board
     assert again.json()["id"] == posting.json()["id"]  # the same board, however it was pasted
     assert client.post("/api/job-board/sources/link", json={"url": "https://boards.greenhouse.io"}).status_code == 422  # no company named
     assert client.post("/api/job-board/sources/link", json={"url": "ftp://example.test"}).status_code == 422
+
+
+@pytest.mark.parametrize("text", ["not a link", "justoneword", "ftp://example.test/jobs"])
+def test_words_are_not_a_job_board(client, text):
+    answer = client.post("/api/job-board/sources/link", json={"url": text})
+    assert answer.status_code == 422
+    assert "isn't a web link" in answer.json()["detail"]
+
+
+def test_a_board_at_no_website_says_so_in_plain_words(client, config, monkeypatch):
+    config.allow_private_urls = False
+
+    def nothing(*a, **k):
+        raise OSError("nodename nor servname provided")
+
+    monkeypatch.setattr("jobpilot.network.socket.getaddrinfo", nothing)
+    answer = client.post("/api/job-board/sources/link", json={"url": "https://no-such-host.example.test/careers"})
+    assert answer.status_code == 422
+    assert answer.json()["detail"].startswith("There's no website at that address")

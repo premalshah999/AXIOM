@@ -4,6 +4,8 @@ from types import SimpleNamespace
 from jobpilot import widgets
 from jobpilot.forms import FormSession
 from jobpilot.page_clock import PageClock
+from support_budget import scaled
+from support_virtual_time import virtual_time
 
 
 async def test_plain_text_uses_input_change_and_readback_without_key_delays(page):
@@ -49,9 +51,10 @@ async def test_settle_deadline_includes_hung_renderer():
     form.clock=PageClock()  # __init__ is skipped; every settle and write is timed on it (page_clock.py)
     form.application_frames=frames
     form.network=None
-    start=time.monotonic()
-    assert not await form.settle(timeout=.05)
-    assert time.monotonic()-start < 5  # the hung renderer sleeps 30 s; a loaded machine must not turn the margin into a flake
+    with virtual_time():  # the hung renderer sleeps 30 s of virtual time: the elapsed time is the deadline, not the machine
+        start=time.monotonic()
+        assert not await form.settle(timeout=.05)
+        assert time.monotonic()-start < 5
 
 
 async def test_field_write_bounds_nested_widget_retries(monkeypatch):
@@ -64,10 +67,11 @@ async def test_field_write_bounds_nested_widget_retries(monkeypatch):
     form._fill=hung
     form.emit=lambda *args: None
     monkeypatch.setattr(forms, 'FIELD_WRITE_SECONDS', .02)
-    start=time.monotonic()
-    with pytest.raises(TimeoutError):
-        await form.fill({'type':'combobox','label':'Country'}, 'United States')
-    assert time.monotonic()-start < 5  # the hung write sleeps 30 s
+    with virtual_time():
+        start=time.monotonic()
+        with pytest.raises(TimeoutError):
+            await form.fill({'type':'combobox','label':'Country'}, 'United States')
+        assert time.monotonic()-start < 5  # the hung write sleeps 30 s of virtual time
 
 
 async def test_alias_option_does_not_wait_for_literal_query_timeout(page):
@@ -75,7 +79,7 @@ async def test_alias_option_does_not_wait_for_literal_query_timeout(page):
     start=time.monotonic()
     result=await widgets.wait_options(page.main_frame, 'menu', query='United States of America', timeout=2)
     assert result[0]['text']=='United States'
-    assert time.monotonic()-start < 1
+    assert time.monotonic()-start < scaled(1)
 
 
 def test_telemetry_does_not_hold_form_readiness_but_application_requests_do():

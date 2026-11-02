@@ -1,7 +1,7 @@
 // Resumes: what employers get right now, the guided way to change that, and the files behind it (DESIGN.md, Resumes).
 // The address says what's open: ?view=resumes&artifact=<id> is that tailored version's preview.
-import { useEffect, useState } from "react";
-import { ArrowLeft, ArrowRight, Download, FileText, PencilLine, Plus } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ArrowLeft, ArrowRight, Download, FileText, ListChecks, PencilLine, Plus } from "lucide-react";
 import { api, ApiError } from "./api";
 import { useWorkspace } from "./context";
 import {
@@ -17,7 +17,7 @@ import {
   type MasterView,
   type Page,
 } from "./features";
-import { ago, day, plural, resumeFileRefusal } from "./format";
+import { ago, day, plural, resumeFileRefusal, isDeveloperText } from "./format";
 import { useAction, useDraft, usePoll } from "./hooks";
 import { Pagination, type Paging } from "./pagination";
 import { downloadPdf, PdfPages, PdfThumb, usePdf } from "./pdfpages";
@@ -64,9 +64,17 @@ export function ResumesView() {
   const sending =
     resumes.find((r) => r.id === (policy?.resume_id || policy?.source_resume_id)) ||
     resumes.find((r) => r.id === status.data?.source?.id) ||
-    (status.data ? null : resumes[0]) ||
+    (status.data?.source ? null : resumes[0]) ||
     null;
   const [file, setFile] = useState<Resume | null>(null);
+  // A resume added or removed here changes what the status says, and its own poll is half a minute away: "Employers get , exactly as you uploaded it."
+  const files = resumes.map((r) => r.id).join();
+  const seen = useRef(files);
+  useEffect(() => {
+    if (seen.current === files) return;
+    seen.current = files;
+    void status.refresh();
+  }, [files, status]);
   return (
     <div className="ax-page rs-page">
       <Sending
@@ -139,20 +147,20 @@ function Sending({
       ? {
           line: (
             <>
-              Employers get <b>{name}</b>, exactly as you uploaded it.
+              Unless you tailor a job, employers get <b>{name}</b>, exactly as you uploaded it.
             </>
           ),
-          // No approved copy means nothing can be reworded (features/resumes prepare_resume: use_master), whatever the policy says:
-          // a first-run "Tailoring is on, but..." read as something broken that had to be fixed before applying.
+          // Each job has its own choice whatever this page says, so this can't read as if nothing else were possible: "it just tells me
+          // the application uses my master resume" (owner, 2026-11-01). A first-run "Tailoring is on, but..." read as something broken that had to be fixed before applying.
           sub: !data
             ? ""
-            : off && data.policy.changed_at
-              ? `Rewording for each job has been off since ${day(data.policy.changed_at)}, so every application sends this same PDF.`
-              : "Every application sends this same PDF. AXIOM can also reword it for each job, if you'd like. That's optional.",
+            : `To tailor one job, choose Apply with tailored resume on it in the Queue, on the Job board or in a review batch. You approve each one first.${
+                off && data.policy.changed_at ? ` Rewording every job automatically has been off since ${day(data.policy.changed_at)}.` : " AXIOM can also reword every job automatically, which is optional."
+              }`,
         }
       : {
           line: "Employers get a version of your approved resume, reworded for each job.",
-          sub: "It uses only what's in your approved copy, and the application waits until that job's version is ready.",
+          sub: "It uses only what's in your approved copy. Each application waits for its version, and for your approval unless you've turned that off in Settings, under Applying.",
         };
   return (
     <section className="ax-panel rs-state" aria-label="What employers get">
@@ -298,6 +306,7 @@ function SetupPath({ data, name, refresh }: { data: MasterStatus; name?: string;
             <p>
               <b>{pct(v.coverage)}</b> of {v.source_words ?? "its"} words match
               {v.added_ratio ? `, ${pct(v.added_ratio)} added` : ""}.
+              {!!v.picture_pages?.length && ` Page ${v.picture_pages.join(", ")} of your PDF is a picture, so its words aren't in this copy.`}
               {v.render_fill && v.source_fill && (
                 <>
                   {" "}
@@ -379,6 +388,7 @@ function SetupPath({ data, name, refresh }: { data: MasterStatus; name?: string;
           <li>Employers get a version of your approved copy reworded for each job, not {name || "your PDF"} as uploaded.</li>
           <li>It only rewords what's in your approved copy. It never adds a tool, metric or project.</li>
           <li>Each version takes a moment and one model call, and the application waits for it.</li>
+          <li>You approve each version before it's sent, unless you've turned that off in Settings, under Applying.</li>
           <li>You can turn it off here at any time.</li>
         </ul>
       </Dialog>
@@ -601,11 +611,13 @@ function AddResume({ file, setFile }: { file: File | null; setFile: (f: File | n
     void run(
       "upload",
       async () => {
-        await api("/resumes", "POST", form);
+        const added = await api<{ warnings?: string[] }>("/resumes", "POST", form);
         setFile(null);
         await refresh();
+        return added;
       },
-      "Resume added.",
+      // What it couldn't read of the file (a page that is a picture, a very long resume) is the person's to know.
+      (added) => ["Resume added.", ...(added?.warnings ?? [])].join(" "),
     );
   };
   return (
@@ -675,6 +687,9 @@ function FilePreview({ resume, sending, onClose }: { resume: Resume | null; send
 function sentWords(a: Artifact, tailoringOff: boolean): { word: string; tone: "ok" | "neutral" | "warn" | "info"; tip?: string } {
   if (a.sent?.state === "confirmed") return { word: `Sent ${day(a.sent.at)}`, tone: "ok", tip: "An application went out with this version." };
   if (a.sent?.state === "unknown") return { word: "Maybe sent", tone: "info", tip: "An application used it, but its outcome wasn't confirmed." };
+  // The job's own choice: this version is the one it sends, whatever the account-wide switch says.
+  if (a.choice?.state === "approved") return { word: "Ready to send", tone: "ok", tip: "This job is set to a tailored resume, and this is the approved version." };
+  if (a.choice?.state === "review") return { word: "Needs your review", tone: "warn", tip: "This job is set to a tailored resume. Approve this version to send it." };
   if (a.status !== "ready") return { word: ARTIFACT_WORD[a.status] || a.status, tone: (ARTIFACT_PILL[a.status] as "neutral") || "neutral" };
   if (!tailoringOff) return { word: "Ready", tone: "ok" };
   // An older server doesn't say what happened to a version. "Never sent" is a claim, so it needs the answer.
@@ -713,7 +728,9 @@ function Versions({ tailoringOff, open, master }: { tailoringOff: boolean; open?
   // Say how old they are only when it's one day's batch, which is what makes them read as old drafts rather than recent work.
   const days = [...new Set(items.map((a) => day(a.created_at)))];
   const line = tailoringOff
-    ? `${days.length === 1 && !status ? `Drafts from ${days[0]}. ` : "Drafts. "}New applications don't use them while rewording is off.`
+    ? items.some((a) => a.choice)
+      ? "A job set to a tailored resume sends its approved version. The others here aren't in use."
+      : `${days.length === 1 && !status ? `Drafts from ${days[0]}. ` : "Drafts. "}Only a job set to a tailored resume sends one.`
     : "Made for each job before its application starts.";
   const columns: Column<Artifact>[] = [
     {
@@ -781,7 +798,7 @@ function Versions({ tailoringOff, open, master }: { tailoringOff: boolean; open?
                 { value: "", label: "Any status" },
                 { value: "ready", label: "Ready" },
                 { value: "building", label: "Building" },
-                { value: "failed", label: "Needs repair" },
+                { value: "failed", label: "Couldn't be made" },
                 { value: "kept_master", label: "Master kept" },
               ]}
               onChange={(v) => {
@@ -826,7 +843,7 @@ function Versions({ tailoringOff, open, master }: { tailoringOff: boolean; open?
                   status
                     ? "Choose another status to see the others."
                     : tailoringOff
-                      ? "Each job gets one here once rewording is on. Until then every application sends the resume above."
+                      ? "One appears here when you choose Apply with tailored resume for a job, in the Queue, on the Job board or in a review batch."
                       : "Each job gets one here before its application starts."
                 }
                 action={
@@ -908,8 +925,13 @@ function VersionPreview({ id, items, tailoringOff }: { id: string; items: Artifa
               </Button>
             )}
             {ready && <DownloadButton url={versionUrl(id)} name={`Resume for ${company}`} variant="secondary" />}
+            {ready && a?.choice && a.job_id && (
+              <Button size="sm" variant="primary" icon={<ListChecks size={14} aria-hidden="true" />} onClick={() => go({ view: "tailor", tailor: a.job_id! })}>
+                Review
+              </Button>
+            )}
             {ready && (
-              <Button size="sm" variant="primary" icon={<PencilLine size={14} aria-hidden="true" />} onClick={() => go({ view: "editor", artifact: id })}>
+              <Button size="sm" variant={a?.choice ? "secondary" : "primary"} icon={<PencilLine size={14} aria-hidden="true" />} onClick={() => go({ view: "editor", artifact: id })}>
                 Open in editor
               </Button>
             )}
@@ -938,9 +960,13 @@ function VersionPreview({ id, items, tailoringOff }: { id: string; items: Artifa
                     : a.sent?.state === "unknown"
                       ? `An application to ${company} used this version, but its outcome wasn't confirmed.`
                       : a.status === "failed"
-                        ? a.error?.detail || (a.error?.code || "").replaceAll("_", " ") || "It couldn't be built."
+                        ? a.failure || "It couldn't be built."
                         : a.status === "kept_master"
                           ? "The reworded version didn't read better than your resume, so your resume was kept."
+                          : a.choice
+                            ? a.choice.state === "approved"
+                              ? `This is ${company}'s tailored resume. You've approved it, so it's what they get.`
+                              : `This is ${company}'s tailored resume. It goes out once you approve it.`
                           : tailoringOff
                             ? a.sent === undefined
                               ? "Nothing new uses this version while rewording is off."

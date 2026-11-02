@@ -8,14 +8,19 @@ from playwright.async_api import Error as PlaywrightError
 from .captcha_observation import PROVIDER_FRAME_JS
 
 
-COOKIE_JS = r"""() => {
+COOKIE_JS = r"""mode => {
   const visible = e => e?.getClientRects().length && getComputedStyle(e).visibility !== 'hidden';
   const usable = e => visible(e) && !e.disabled && e.getAttribute('aria-disabled') !== 'true' && !e.closest('[inert]');
-  const labels = /^(accept( all)?( cookies)?|allow( all)?( cookies)?|i accept|agree(?: and proceed)?|got it|ok)$/i;
-  const selectors = ['#onetrust-accept-btn-handler','#truste-consent-button',
+  // Accepting needs the saved consent; declining tracking never gives one, so a banner over the page is always answerable.
+  const accepting = mode !== 'decline';
+  const labels = accepting
+    ? /^(accept( all)?( cookies)?|allow( all)?( cookies)?|i accept|agree(?: and proceed)?|got it|ok)$/i
+    : /^(decline( all)?( cookies)?|reject( all)?( cookies)?|deny( all)?|no,? thanks|(?:use |accept )?(?:only )?(?:strictly )?(?:necessary|essential)(?: cookies)?(?: only)?)$/i;
+  const selectors = accepting ? ['#onetrust-accept-btn-handler','#truste-consent-button',
     '#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll','.cc-allow','.cookie-accept',
     '[data-testid="cookie-accept"]','button[id*="accept" i][id*="cookie" i]',
-    'button[aria-label*="accept" i][aria-label*="cookie" i]'];
+    'button[aria-label*="accept" i][aria-label*="cookie" i]'] : [
+    '#onetrust-reject-all-handler','#CybotCookiebotDialogBodyButtonDecline'];
   const roots = [...document.querySelectorAll(
     '[id*=cookie i],[class*=cookie i],[aria-label*=cookie i],#onetrust-banner-sdk,'+
     '#__tealiumGDPRecModal,.privacy_prompt,[id*=consent i],[class*=consent i]'
@@ -27,7 +32,22 @@ COOKIE_JS = r"""() => {
   )].filter(e => visible(e) && (e.innerText || '').length < 1500 &&
     /^\s*(?:cookie (?:preferences|settings|consent|notice|policy)|we use (?:technology, such as )?cookies)\b/i
       .test(e.innerText || '')));
+  // A notice with no cookie id, class or word of its own: Soni's bar ("This website uses analytics and tracking
+  // technologies", Accept / Decline) hid the final Submit of the form above it and every click was "covered". A control
+  // that carries the label, inside a pinned bar that names tracking, is that notice.
+  const NOTICE = /\b(?:cookies?|analytics|tracking technologies|tracking)\b/i;
+  const pinnedNotice = e => {
+    for (let n = e.parentElement, i = 0; n && n !== document.body && i < 5; n = n.parentElement, i++) {
+      const pos = getComputedStyle(n).position, text = n.innerText || '';
+      if ((pos === 'fixed' || pos === 'sticky') && text.length < 1500 && NOTICE.test(text)
+          && n.getBoundingClientRect().height < innerHeight * 0.45) return true;
+    }
+    return false;
+  };
+  const pinned = [...document.querySelectorAll('button,a,[role=button]')]
+    .filter(e => labels.test((e.innerText || e.getAttribute('aria-label') || '').trim()) && visible(e) && pinnedNotice(e));
   const candidates = [...new Set([
+    ...pinned,
     ...selectors.flatMap(s => [...document.querySelectorAll(s)]),
     ...roots.flatMap(root => [...root.querySelectorAll('button,a,[role=button]')]
       .filter(e => labels.test((e.innerText || e.getAttribute('aria-label') || '').trim())))
@@ -47,14 +67,14 @@ COOKIE_JS = r"""() => {
 
 
 async def dismiss_cookies(page, *, authorized):
-    """One bounded native cookie action per frame; no application consent guesses."""
-    if not authorized:
-        return False
+    """One bounded native cookie action per frame; no application consent guesses. With the saved consent it accepts;
+    without it, it only declines (or keeps the necessary cookies), which gives no consent and uncovers the page."""
+    mode = "accept" if authorized else "decline"
     clicked = False
     for frame in page.frames[:12]:
         try:
             async with asyncio.timeout(2):
-                target = await frame.evaluate(COOKIE_JS)
+                target = await frame.evaluate(COOKIE_JS, mode)
                 if target:
                     control = frame.locator(f'[data-jp-cookie-action="{target}"]')
                     # Consent managers may ignore synthetic DOM click events.

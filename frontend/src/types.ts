@@ -70,6 +70,8 @@ export type Review = {
   allow_other?: boolean;
   /** The form takes several answers ("select all that apply"): sent one option per line. */
   multiple?: boolean;
+  /** The answer belongs to one employer ("Why this role?"): never one answer for two employers, however alike the words. */
+  employer_only?: boolean;
   accept?: string;
   /** Where on the form it sits, and the row of the work history it belongs to. */
   context?: {
@@ -78,6 +80,12 @@ export type Review = {
     group?: string;
     caption?: string;
     hint?: string;
+    /** The other boxes beside a tick box: "None of the above" means nothing without them. */
+    peers?: string;
+    /** The list empties until something is typed: the form itself searches. */
+    search_only?: boolean;
+    /** What was read of the list may not be all of it. */
+    options_partial?: boolean;
     history_kind?: string;
     history_identity?: { company?: string; title?: string; school?: string };
   } | null;
@@ -263,6 +271,8 @@ export type ApplicationWorkers = {
   // Custom career-site applications run on their own slot (a third lane); absent on older servers.
   custom_workers?: number;
   assignments: ApplicationWorkerAssignment[];
+  /** Each lane's room: "normal" is the regular workers. */
+  pools?: Record<string, { limit: number; running: number; occupied: number; available: number }>;
 };
 export type AutopilotRuntime = {
   application_workers?: ApplicationWorkers;
@@ -303,6 +313,7 @@ type JobControl = {
 };
 export type Snapshot = {
   autopilot_runtime?: AutopilotRuntime;
+  waiting?: Waiting;
   job_controls?: Record<string, JobControl>;
   scheduler_health?: SchedulerHealth;
   scheduler_heartbeat?: { at?: string };
@@ -447,12 +458,12 @@ type FailureReport = {
   summary: string;
   likely_cause: string;
   next_steps: string[];
-  source: string;
-  evidence: Record<string, unknown>;
 };
 export type Detail = {
   failure_report?: FailureReport | null;
   run: Run;
+  /** What happened, as a person follows it (vocabulary.activity). `events` is the engine's own diary, which no screen shows. */
+  activity: { id: number; created_at: string; kind: string; message: string }[];
   events: {
     id: number;
     created_at: string;
@@ -477,6 +488,8 @@ export type RuntimeHealth = {
     provider: AgentModelProvider;
     model: string;
     state: "ready" | "cooldown" | "recovery_ready" | "recovering";
+    /** "ready" only says nothing is holding it back: without a key it still cannot answer. */
+    has_key?: boolean;
     retry_at: string | null;
     last_error: string | null;
   }>>;
@@ -572,6 +585,7 @@ export type Success = {
   ats: string;
   website_confirmed: boolean;
   email_confirmed: boolean;
+  /** On file with the employer but not sent by AXIOM (jobpilot/api/success_core.py `ours`): no "sent" filter or daily count takes it. */
   existing_application: boolean;
   /** What proved it (the server decides from the receipt): see PROOF in model.ts. */
   proof: Proof;
@@ -590,9 +604,23 @@ export type SuccessRow = {
   final_pct: number | null;
   first_try_pct: number | null;
   meets_target: boolean;
+  attempted: number;
+  /** Confirmed over every job tried. */
+  raw_pct: number | null;
+  strict_pct: number | null;
+  /** Confirmed on the employer's own page or email, over eligible. */
+  strong_pct: number | null;
+  first_try: number;
+  failed: number;
+  /** Jobs left out of eligible, by structured reason (success_core.py EXCLUDED). */
+  excluded: Record<string, number>;
+  failures: Record<string, number>;
+  evidence: { strong: number; medium: number; weak: number; kinds: Record<string, number> };
 };
 export type SuccessReport = {
   days: number;
+  /** The window's start: the jobs first tried at or after it. */
+  since: string;
   target: number;
   overall: SuccessRow;
   platforms: (SuccessRow & { ats: string; volume: boolean })[];
@@ -736,7 +764,23 @@ export type QueueRetry = {
   since: string;
   tries: number;
 };
+/** Why nothing is starting, one answer for every screen (jobpilot/waiting.py). */
+export type WaitReason = {
+  code: string;
+  title: string;
+  says: string;
+  next: string;
+  /** The short form beside each job it holds. */
+  row: string;
+  action: { label: string; view: "settings" | "review" | "board"; tab?: string } | null;
+  /** Nothing in line can start until this changes. */
+  blocking: boolean;
+};
+/** What else waits on the person that would give free workers something to do, with where to act on it. */
+export type WaitAsk = { says: string; links: { label: string; view: "needs"; filter: string }[] };
+export type Waiting = { reason: WaitReason | null; ask?: WaitAsk | null; battery: string; slow: string; in_line: number };
 export type QueuePage = {
+  why?: Waiting;
   at: string;
   planning?: boolean;
   paused: boolean;
@@ -745,7 +789,7 @@ export type QueuePage = {
   /** The dispatcher starts Ready jobs by itself. Off, only what was asked for starts. */
   dispatching?: boolean;
   stopped: string | null;
-  workers: { normal: number; specialist: number; custom: number; free: number };
+  workers: { normal: number; specialist: number; custom: number; free: number; normal_free?: number };
   decides: string;
   exact: number;
   running: QueueRunning[];
@@ -788,6 +832,8 @@ export type BoardFacet = { value: string; label: string; count: number };
 // GET /api/review-batch (jobpilot/review_batch.py): the open batch, and what the empty screen needs to say.
 export type ReviewRow = { id: string; title: string; company: string; location: string; url: string; ats: string; posted_at: string; dated: boolean; source: string; score: number; line: string; level: string };
 export type ReviewBatch = {
+  /** Automatic applying is on and its batch is running: good matches go in line by themselves. */
+  dispatching?: boolean;
   mode: "review" | "auto";
   planning?: boolean;
   id: string;
@@ -800,6 +846,8 @@ export type ReviewBatch = {
 
 export type BoardPage = {
   planning?: boolean;
+  /** The first read of the board failed: nothing to show, and it isn't still loading either. It is tried again by itself. */
+  failed?: boolean;
   rows: BoardRow[];
   total: number;
   /** What Select all takes: every row these filters show that can be queued or moved up the line, on any page. */
@@ -808,6 +856,10 @@ export type BoardPage = {
   pages: number;
   size: number;
   all: number;
+  /** How many jobs the main list holds, whichever section is showing. */
+  main?: number;
+  /** Every job waiting in line, whichever list it came from: the number the Queue page opens. */
+  in_queue?: number;
   hidden: { blank: number; stale: number; closed: number; applied: number; twin: number };
   searched_at: string | null;
   scanning: number;
@@ -816,6 +868,8 @@ export type BoardPage = {
   scan_total?: number;
   enabled: boolean;
   window: number;
+  live_window?: number;
+  in_line_older?: number;
   grouped?: boolean;
   per_company?: number;
   /** How many company-site jobs the Company sites section holds (jobpilot/company_sites.py); they are never among `rows` of the main list. */

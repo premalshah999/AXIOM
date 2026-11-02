@@ -780,7 +780,7 @@ async def send_help(service, run_id, payload, *, question=None, review_key=None,
     fits = len(text) <= 1000
     data = {"chat_id": service.config.telegram_user_id, "caption": short_caption(text)}
     if fits and payload.get("reply_markup"):
-        data["reply_markup"] = json.dumps(payload["reply_markup"])
+        data["reply_markup"] = json.dumps(masked_buttons(payload["reply_markup"]))
     photo = None
     try:
         async with httpx.AsyncClient(timeout=12) as client:
@@ -1220,6 +1220,19 @@ async def chat(service, text, job_id=None):
     return reply.reply
 
 
+def masked_buttons(markup):
+    """A button's words come from a site's options and are sent like any text. Its callback data is ours, and is left exactly as it is."""
+    if not isinstance(markup, dict) or not markup.get("inline_keyboard"):
+        return markup
+    return {
+        **markup,
+        "inline_keyboard": [
+            [{**button, "text": redact(button.get("text"))} if isinstance(button, dict) else button for button in row]
+            for row in markup["inline_keyboard"]
+        ],
+    }
+
+
 async def api(config, method, payload):
     if not config.telegram_enabled:
         return None
@@ -1230,6 +1243,8 @@ async def api(config, method, payload):
     if method in {"sendMessage", "editMessageText", "sendPhoto"}:
         # Nothing that looks like a key leaves this computer, whatever built the text (an error from a service, a page's words).
         payload = {k: redact(v) if k in {"text", "caption"} else v for k, v in payload.items()}
+        if payload.get("reply_markup"):
+            payload["reply_markup"] = masked_buttons(payload["reply_markup"])
     async with httpx.AsyncClient(timeout=35 if method == "getUpdates" else 8) as client:
         response = await client.post(
             f"https://api.telegram.org/bot{config.telegram_bot_token}/{method}", json=payload

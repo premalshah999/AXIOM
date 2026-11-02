@@ -11,7 +11,8 @@ TARGET_GAP_PT = 16  # About 1.5 lines of 9 pt text: the target state, not a prob
 # A short resume stays tight (owner, 2026-11-02: "tighten the spacing"): spacing never grows far to fill a page.
 MAX_WIDEN = {"section_gap": 5.0, "entry_gap": 2.0, "bullet_gap": 0.5}
 LINE_SPACING_STEPS = ()
-# Tighter and tighter, sizes untouched. Past the last step the content really doesn't fit one page.
+# Tighter and tighter, sizes untouched. Past the last step the content really doesn't fit one page. A step only ever tightens:
+# a tailored page starts at 0.25 inch margins, and a step's wider margin or gap must not undo that (owner, 2026-11-02).
 TIGHTER = (
     {"section_gap": 5, "entry_gap": 2, "bullet_gap": 0.5},
     {"section_gap": 4, "entry_gap": 1.5, "bullet_gap": 0, "margin_top": 0.4, "margin_bottom": 0.4, "margin_left": 0.5, "margin_right": 0.5},
@@ -46,7 +47,9 @@ async def fit(doc: ResumeDoc, style: Style, compile_fn, timeout: float = 40) -> 
     fill = measure_fill(compiled.pdf)
     if fill["pages"] > 1:
         for step in TIGHTER:
-            tried = style.model_copy(update=step)
+            tried = style.model_copy(update={k: min(v, getattr(style, k)) for k, v in step.items()})
+            if tried == style:
+                continue
             attempt = await build(tried)
             if not attempt.ok:
                 continue

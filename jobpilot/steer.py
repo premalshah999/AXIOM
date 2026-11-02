@@ -18,10 +18,16 @@ How it holds the page without a second writer on a worker's tab:
      re-reads the page and carries on). A page that already shows a confirmation is refused: it would be sent twice.
    - I submitted it myself: the owner's word is recorded as the application's receipt (service.reconcile), so every
      duplicate guard holds and a retry is refused.
-   - Give it back: released the same way; the engine decides what to do, and asks again if it must.
+   - Give it back: released the same way; the engine decides what to do, and asks again if it must. A page that already shows a
+     confirmation is refused here too.
+
+Done, continue hands back only what the person saw: the tab they had open, at the address it showed when they pressed the button.
+A closed tab, or a run that ends up on another tab or address (a wait for a free worker, the tab cleanup, a restart from the job page),
+keeps nothing by hand: every answer on that page goes through the usual checks (owner_saw).
 """
 
 import re
+from datetime import UTC, datetime, timedelta
 
 import httpx
 from sqlalchemy import select
@@ -35,6 +41,8 @@ TAKEABLE = {"waiting_answer", "needs_review", "waiting_browser", "timed_out", "f
 # "I submitted it myself" and the evidence forms exist for those.
 COMMITTED_STATES = {"confirmed", "already_applied", "submitting", "submission_unknown"}
 ACTIVE_STATES = {"queued", "running", "submitting"}
+# Rebuilding a draft takes a few minutes at most; past this the panel offers the way out.
+OPENING_PATIENCE = timedelta(minutes=10)
 # A page whose address or title says the application went through.
 CONFIRMATION = re.compile(
     r"thank[\s-]*you|\bconfirm(?:ation|ed)?\b|\bsubmitted\b|\bsuccess(?:ful)?\b|application[\s-]*(?:received|complete)|"
@@ -117,11 +125,27 @@ def surface(config, target_id):
         return False
 
 
+def opening_stuck(service, job_id, held):
+    """True when the run opening the application for the owner has ended without handing it over, or has taken far too long. A restart
+    can end that run without the hand-over (complete), and the job would stay paused and "opening" with no way out."""
+    with service.db.session() as s:
+        run = s.get(Run, held.get("run_id") or "")
+        if run is None or run.state not in ACTIVE_STATES:
+            return True
+    try:
+        since = datetime.fromisoformat(str(held.get("at")))
+    except ValueError:
+        return True
+    return datetime.now(UTC) - (since if since.tzinfo else since.replace(tzinfo=UTC)) > OPENING_PATIENCE
+
+
 def status(service, job_id):
     """What the Take over panel shows for one job."""
     held = record(service.db, job_id)
     phase = held.get("phase", "")
     out = {"job_id": job_id, "phase": phase, "run_id": held.get("run_id", ""), "since": held.get("at", "")}
+    if phase == "opening":
+        out["stuck"] = opening_stuck(service, job_id, held)
     if phase == "yours":
         target = (service.db.get_setting("desktop_job:" + job_id, {}) or {}).get("target_id")
         tabs = _targets(service.config)
@@ -219,12 +243,26 @@ def complete(service, run_id, result, elapsed):
 
 
 def hands_back(session, job_id):
-    """True once, for the submit run that follows Done, continue: it keeps what the owner entered on the page (forms.adopt_owner_values)."""
+    """Once, for the submit run that follows Done, continue: the tab and address the owner left (forms.adopt_owner_values), else None."""
     row = session.get(Setting, KEY + job_id)
     if row and (row.value or {}).get("phase") == "released" and (row.value or {}).get("hands"):
+        handed = row.value["hands"]
         row.value = {**row.value, "hands": False}
-        return True
-    return False
+        return handed if isinstance(handed, dict) else None
+    return None
+
+
+def owner_saw(handed, resumed, target_id, url):
+    """True only when this run opened on the very page the owner handed back: the same tab, at the same address. Anything else on the
+    screen now (a fresh tab, a reopened route, a page that moved on) is not what they looked at, so none of it counts as theirs."""
+    return bool(
+        isinstance(handed, dict)
+        and resumed
+        and handed.get("target_id")
+        and handed.get("target_id") == target_id
+        and handed.get("url")
+        and handed.get("url") == url
+    )
 
 
 def release(service, job_id, *, hands=False):
@@ -256,18 +294,25 @@ async def finish(service, job_id, how):
 
     held = record(service.db, job_id)
     if held.get("phase") == "opening":
-        raise ValueError("The application is still opening. Give it a moment.")
-    if held.get("phase") != "yours":
+        if how != "back" or not opening_stuck(service, job_id, held):
+            raise ValueError("The application is still opening. Give it a moment.")
+        with service.db.exclusive() as s:
+            run = s.get(Run, held.get("run_id") or "")
+            if run is not None and run.state == "queued":
+                run.state, run.finished_at = "cancelled", now()
+    elif held.get("phase") != "yours":
         raise ValueError("You don't have this application.")
-    if how == "done":
-        target = (service.db.get_setting("desktop_job:" + job_id, {}) or {}).get("target_id")
-        tab = (_targets(service.config) or {}).get(target or "")
-        if tab and CONFIRMATION.search(" ".join([tab.get("title", ""), tab.get("url", "")])):
-            raise ValueError(
-                "That page looks like a confirmation. If you sent the application, choose \"I submitted it myself\": "
-                "continuing could send it twice."
-            )
-    resume_id = release(service, job_id, hands=how == "done")
+    target = (service.db.get_setting("desktop_job:" + job_id, {}) or {}).get("target_id")
+    tab = (_targets(service.config) or {}).get(target or "")
+    # Both ways start a real run: Give it back on a page that already says it was received sends it twice just the same.
+    if tab and CONFIRMATION.search(" ".join([tab.get("title", ""), tab.get("url", "")])):
+        raise ValueError(
+            "That page looks like a confirmation. If you sent the application, choose \"I submitted it myself\": "
+            "continuing could send it twice."
+        )
+    # What the owner had in front of them when they pressed the button; with the tab closed they have handed back nothing.
+    handed = {"target_id": target, "url": tab.get("url", "")} if how == "done" and tab else None
+    resume_id = release(service, job_id, hands=handed)
     try:
         run = await service.queue(job_id, "submit", resume_id, retry=True, owner_pick=True)
     except QueueBlocked as exc:

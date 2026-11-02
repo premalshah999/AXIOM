@@ -9,6 +9,7 @@ import time
 from unittest.mock import AsyncMock
 
 from jobpilot import widgets
+from support_budget import scaled
 
 MENU = """<button id=degree aria-haspopup=listbox aria-expanded=false aria-controls=list
   onclick="const l=document.getElementById('list');l.hidden=!l.hidden;this.setAttribute('aria-expanded',String(!l.hidden))">Select One</button>
@@ -33,7 +34,7 @@ async def test_short_complete_list_chooses_without_type_ahead(page):
     started = time.monotonic()
     committed = await widgets.dropdown(page.main_frame, page.locator("#degree"), "BE", choose=choose)
     assert committed == "BS"
-    assert time.monotonic() - started < 2
+    assert time.monotonic() - started < scaled(2)
     assert await page.evaluate("window.typed") == ""
     choose.assert_awaited_once_with(degrees)
 
@@ -76,6 +77,6 @@ async def test_a_virtualized_list_types_the_full_name_and_takes_the_policy_equiv
         prefer=lambda offered: "Bachelor's Degree" if "Bachelor's Degree" in offered else None,
     )
     assert committed == "Bachelor's Degree"
-    assert time.monotonic() - started < 6
+    assert time.monotonic() - started < scaled(6)
     assert (await page.evaluate("window.typed")).lower().startswith("bachelor")
     choose.assert_not_awaited()

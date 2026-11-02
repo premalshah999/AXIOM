@@ -90,7 +90,9 @@ async def setup_engine(
     box, run, rule = await configured(service)
     cfg = service.config
     cfg.mail_poll_seconds = 0.1
-    cfg.mail_wait_seconds = 5
+    # A ceiling on the window, paid only when the mail never comes (no test here waits one out). 5 s started before the page
+    # had even loaded, so on a loaded Mac the window could end before the mail or the inline wait did (2026-11-01).
+    cfg.mail_wait_seconds = 120
     resume = tmp_path / "fixture-resume.pdf"
     resume.write_bytes(resume_pdf)
     profile = Profile(

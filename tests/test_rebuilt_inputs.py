@@ -13,6 +13,7 @@ import pytest
 from jobpilot.answers import Resolver
 from jobpilot.forms import FormSession
 from jobpilot.schemas import Profile
+from support_budget import scaled
 
 REBUILD = """() => document.querySelectorAll('input').forEach(e => {
   const n = e.cloneNode(); n.removeAttribute('data-jp-id'); e.replaceWith(n);
@@ -34,7 +35,7 @@ async def test_fields_rebuilt_before_the_write_are_found_by_their_stable_name(pa
     started = time.monotonic()
     for label, value in [("First Name", "Alex"), ("Last Name", "Rivera"), ("City", "Springfield")]:
         assert await form.fill(fields[label], value) == value
-    assert time.monotonic() - started < 3
+    assert time.monotonic() - started < scaled(3)
     assert await page.locator('input[name="legalName--firstName"]').input_value() == "Alex"
     assert await page.locator('input[name="legalName--lastName"]').input_value() == "Rivera"
     assert await page.locator('input[name="city"]').input_value() == "Springfield"
@@ -66,5 +67,5 @@ async def test_a_rebuilt_phone_input_is_written_without_waiting(page, service, t
     await page.evaluate(REBUILD)
     started = time.monotonic()
     await form.fill(phone, "3015550123")
-    assert time.monotonic() - started < 4
+    assert time.monotonic() - started < scaled(4)
     assert "3015550123" in await page.locator("input[name=phoneNumber]").input_value()

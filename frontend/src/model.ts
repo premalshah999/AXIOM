@@ -105,7 +105,7 @@ export const STATES: Record<string, StateInfo> = {
       "Sent, but no receipt was captured. Check your email, or confirm it yourself.",
   },
   confirmed: {
-    label: "Applied",
+    label: "Confirmed",
     tone: "ok",
     group: "done",
     explain:
@@ -145,7 +145,7 @@ export const STATES: Record<string, StateInfo> = {
   },
   // Jobs with no application attempt yet (Job.status).
   "job:new": {
-    label: "Checking fit",
+    label: "Checking match",
     tone: "idle",
     group: "new",
     explain:

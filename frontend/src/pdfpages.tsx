@@ -2,6 +2,7 @@
 // new tab goes nowhere and the server's "attachment" answer would only download. The library loads when the first one is shown. Each
 // update renders off-screen and swaps in when complete, so the page never flickers while typing.
 import { useEffect, useRef, useState } from "react";
+import { plainError } from "./format";
 import { FileText, Maximize2, Minus, Plus, StretchHorizontal } from "lucide-react";
 import { signedOut } from "./api";
 import { IconButton } from "./ui/index";
@@ -28,9 +29,14 @@ const files = new Map<string, Promise<ArrayBuffer>>();
 function readPdf(url: string): Promise<ArrayBuffer> {
   let file = files.get(url);
   if (!file) {
-    file = fetch(url, { credentials: "same-origin" }).then((r) => {
+    file = fetch(url, { credentials: "same-origin" }).then(async (r) => {
       if (r.status === 401) signedOut("Your session ended. Sign in again.");
-      if (!r.ok) throw new Error(r.status === 404 ? "This PDF is no longer on file." : "This PDF could not be opened.");
+      if (r.status === 404) throw new Error("This PDF is no longer on file.");
+      if (!r.ok) {
+        // A refusal that says why (a project preview that doesn't pass its checks) says it here.
+        const said = await r.json().then((b: { detail?: unknown }) => b?.detail, () => "");
+        throw new Error(typeof said === "string" && said ? said : "This PDF could not be opened.");
+      }
       return r.arrayBuffer();
     });
     files.set(url, file);
@@ -47,7 +53,7 @@ export function usePdf(url: string | null) {
     let current = true;
     readPdf(url).then(
       (data) => current && setState({ url, data, error: "" }),
-      (e: Error) => current && setState({ url, data: null, error: e.message }),
+      (e: Error) => current && setState({ url, data: null, error: plainError(e.message) }),
     );
     return () => {
       current = false;

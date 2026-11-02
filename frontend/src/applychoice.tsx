@@ -50,6 +50,10 @@ export function ApplyChoices({ ids, children }: { ids: string[]; children: React
 
 export function ApplyChoice({ jobId }: { jobId: string }) {
   const list = useContext(Ctx);
-  if (!list) return <TailorChoice jobId={jobId} compact />;
-  return <TailorChoice jobId={jobId} compact listed known={list.held.choices[jobId] ?? null} modes={list.held.modes ?? undefined} onChange={(s) => list.set(jobId, s)} />;
+  // In a row it has no label beside it, so hovering says what it chooses.
+  return (
+    <span title="How to apply: with your resume as it is, or a tailored one">
+      {list ? <TailorChoice jobId={jobId} compact listed known={list.held.choices[jobId] ?? null} modes={list.held.modes ?? undefined} onChange={(s) => list.set(jobId, s)} /> : <TailorChoice jobId={jobId} compact />}
+    </span>
+  );
 }

@@ -493,7 +493,7 @@ class CaptchaSolver:
                 from .agent_settings import enabled
 
                 if not enabled(self.db, "captcha"):
-                    self.last_reason = "The CAPTCHA agent is disabled in System settings"
+                    self.last_reason = "Solving captchas is turned off under Settings > Advanced"
                     self.challenge_unverified, self.active_challenge = True, (frame, info)
                     return False
             refresh = bool(

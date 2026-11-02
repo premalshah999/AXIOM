@@ -127,11 +127,15 @@ async def test_another_employers_reset_link_is_never_the_newest(service):
     assert service.mail.claim(c["id"]) == {"kind": "link", "value": "https://careers.acme.test/reset?t=" + "a" * 12}
 
 
-def adapter(service, record, *, arrives):
+def adapter(service, record, *, arrives, kept=None):
     value = Adapter.__new__(Adapter)
     value.service, value.attempts = service, Counter()
     value.challenge = None
-    value.inbox = SimpleNamespace(configured=True, live=lambda challenge: False)
+    async def nothing_kept(*_a):
+        return kept
+
+    value.inbox = SimpleNamespace(configured=True, live=lambda challenge: False, kept_reset=nothing_kept)
+    value.e, value.job, value.accounts = SimpleNamespace(run_id="r1"), {}, SimpleNamespace(email="alex@example.test")
     value.calls = []
 
     async def arm_mail(kind="auto"):
@@ -175,6 +179,14 @@ async def test_the_next_attempt_uses_the_late_mail_instead_of_asking_again(servi
     assert await value.earlier_reset_mail("https://careers.acme.test/", dict(ASKED)) == {"state": "done"}
     assert value.calls == [("arm", "password_reset"), "poll", ("complete", "https://careers.acme.test/")]
     assert value.reset_in_progress is True
+
+
+async def test_a_reset_mail_an_interrupted_attempt_held_is_used_without_searching_or_asking(service):
+    held = {"id": "kept-1"}
+    value = adapter(service, ASKED, arrives=False, kept=held)
+    assert await value.earlier_reset_mail("https://careers.acme.test/", dict(ASKED)) == {"state": "done"}
+    assert value.calls == [("complete", "https://careers.acme.test/")]
+    assert value.challenge == held and value.reset_in_progress is True
 
 
 async def test_when_nothing_arrived_the_window_is_released_and_the_usual_path_follows(service):

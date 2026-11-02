@@ -94,7 +94,7 @@ export function HistoryList({ word, inline }: { word: Word | "unconfirmed"; inli
         busy={list.loaded && !list.current}
         footer={list.paging.total > 0 ? <Pagination paging={list.paging} label="Job list pages" /> : undefined}
         selectAll={list.paging.total ? { count: list.paging.total, run: matching.selectAll, busy: matching.selecting } : undefined}
-        bulk={<PipelineBulk selection={selection} rows={list.rows} filter={word as Group} known={matching.known} />}
+        bulk={<PipelineBulk selection={selection} known={matching.known} />}
         empty={
           <Empty
             icon={q ? SearchX : Briefcase}

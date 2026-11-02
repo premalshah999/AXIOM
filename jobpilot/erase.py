@@ -6,15 +6,18 @@ eraser. The app (api/routes/settings.py) validates the typed confirmation, pause
 exits. The Mac app's supervisor starts nothing while the marker names a living eraser (native/supervisor.py), then starts everything
 as on a first run; without a supervisor, whoever starts the app next finds it empty.
 
-What goes: the database (every table, and the workflow history), the data folder's files (saved pages, resumes, sessions, the
-saved keys and the key that seals them, the database choice), the worker and twin Chrome profiles, and the database copies in the
-backup folder. What stays, because the installation cannot start without it and it holds nothing about the owner: the cluster's
-own folder, the supervisor's folder, and the access token this window signs in with. What cannot be removed from here is in
-CANNOT, and the screen says it in the same words.
+What goes: the database (every table, the workflow history, and on this computer the write-ahead log that still holds the rows), the
+data folder's files (saved pages, resumes, sessions, the saved keys and the key that seals them, the database choice), the worker
+and twin Chrome profiles, the database copies in the backup folder, the logs (they name employers and questions; the running programs
+keep their files open, so those are emptied rather than deleted), and whatever the Mac app's settings file (`.env`) holds beyond the
+machine's own settings. What stays, because the installation cannot start without it and it holds nothing about the owner: the
+cluster's own folder, the supervisor's folder, the database password and the access token this window signs in with. What cannot be
+removed from here is in CANNOT, and the screen says it in the same words.
 """
 
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -29,17 +32,51 @@ MARKER = "erasing.json"
 # Installation scaffolding inside the data folder: the empty database cluster, the supervisor's own state and releases, the
 # token the window signs in with, and an index hint. None of it holds anything about the owner.
 KEEP = {"postgres", "native", "access-token", ".metadata_never_index", MARKER}
-BACKUP_PREFIX = "axiom-"
 CANNOT = [
     "Applications already sent. The employers have them.",
     "Accounts AXIOM created at employers. Close them on the employers' sites; their emails to you stay in your own mailbox.",
+    "Your AI key and your Gmail app password. They still work at the services that issued them: revoke them there.",
+    "Copies outside AXIOM: a Time Machine backup of this Mac, or a database copy you saved to another folder.",
 ]
+# The settings of the Mac app's `.env` that are about this machine (desktop.first_config, ports and tuning). Everything else in it, on
+# an installation moved in from another, can be an API key, a password or an address, and goes.
+MACHINE_SETTINGS = re.compile(r"POSTGRES_PASSWORD|APP_TOKEN|APP_PORT|TIMEZONE|SHUTDOWN_DRAIN_SECONDS|[A-Z]+_WORKERS|AXIOM_[A-Z0-9_]+")
 
 
 def backup_folder(environ=None):
     """Where database copies are kept; AXIOM_BACKUP_DIR moves it (tests use it, so that no test touches the real folder)."""
     environ = os.environ if environ is None else environ
     return Path(environ.get("AXIOM_BACKUP_DIR") or Path.home() / "axiom-backups")
+
+
+def log_folders(config=None, environ=None):
+    """Where the Mac app and the supervisor write their logs: AXIOM_LOG_DIR (the app sets it to ~/Library/Logs/AXIOM)."""
+    environ = os.environ if environ is None else environ
+    found = set()
+    if config is not None:
+        found.add(Path(config.data_dir) / "native" / "logs")  # Where the supervisor logs without the Mac app.
+    if environ.get("AXIOM_LOG_DIR"):
+        found.add(Path(environ["AXIOM_LOG_DIR"]).expanduser())
+    return sorted(found)
+
+
+def clear_logs(folder, say=None):
+    """Empty the logs in `folder` and delete their rotated copies. A log is truncated in place, not deleted: the supervisor and the
+    services hold it open for appending and would go on writing into a file nobody can see. The eraser's own log stays."""
+    problems = []
+    for path in sorted(Path(folder).glob("*")) if Path(folder).is_dir() else []:
+        if path.name == log_path().name or path.is_dir() or path.is_symlink():
+            continue
+        try:
+            if path.suffix == ".log":
+                os.truncate(path, 0)
+            elif ".log." in path.name:
+                path.unlink()
+        except OSError:
+            problems.append(path.name)
+            if say:
+                say(f"Could not empty {path}.")
+    return problems
 
 
 def marker(data_dir):
@@ -124,18 +161,88 @@ def wipe_database(url, say):
             Path(str(file) + suffix).unlink(missing_ok=True)
         say(f"Removed the database file {file.name}.")
         return
-    from sqlalchemy import text
+    from sqlalchemy import inspect, text
 
     from .db import Base, Database
+    from .features._store import FeatureBase, create_tables
 
     db = Database(url)
     try:
+        create_tables(db.engine)  # Registers the feature tables on their metadata: the facts, answers and tailored resumes are there.
         with db.engine.begin() as connection:
             connection.execute(text("DROP SCHEMA IF EXISTS dbos CASCADE"))
+        FeatureBase.metadata.drop_all(db.engine)
         Base.metadata.drop_all(db.engine)
+        rest = inspect(db.engine).get_table_names()
+        if on_this_computer(url):
+            # This cluster is AXIOM's alone, so a table an older version left behind goes too. A server may hold someone else's.
+            with db.engine.begin() as connection:
+                for table in rest:
+                    connection.execute(text('DROP TABLE IF EXISTS "{}" CASCADE'.format(table.replace('"', '""'))))
+            forget_write_ahead_log(db.engine, say)
+        elif rest:
+            say(f"Left {len(rest)} tables on the server that are not AXIOM's: {', '.join(sorted(rest))[:300]}.")
         say("Dropped every table and the workflow history.")
     finally:
         db.engine.dispose()
+
+
+def on_this_computer(url):
+    return urlsplit(url).hostname in {"127.0.0.1", "localhost", "::1"}
+
+
+# Far more rounds than a cluster has log files: each one finishes a file, and the loop ends when the old ones are gone.
+LOG_ROUNDS = 400
+
+
+def forget_write_ahead_log(engine, say):
+    """Dropping a table leaves its rows behind: in PostgreSQL's write-ahead log, whose finished files are kept and renamed for reuse
+    until new writes happen to cover them, and in the samples pg_statistic took of each column. A resume's text was still readable in
+    pg_wal after everything was deleted. VACUUM FULL rewrites the catalogs; then, with recycling off, each round finishes one log file
+    and a checkpoint removes it instead of keeping it, until none of the old files is left. A failure here leaves the database empty
+    as promised, so it is reported and nothing more."""
+    from sqlalchemy import text
+
+    try:
+        with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+            connection.execute(text("VACUUM FULL"))
+            connection.execute(text("ALTER SYSTEM SET wal_recycle = off"))
+            connection.execute(text("SELECT pg_reload_conf()"))
+            time.sleep(1)
+            for _ in range(LOG_ROUNDS):
+                connection.execute(text("CHECKPOINT"))
+                connection.execute(text("SELECT pg_switch_wal()"))
+                connection.execute(text("CHECKPOINT"))
+                if connection.scalar(text("SELECT count(*) FROM pg_ls_waldir() WHERE name ~ '^[0-9A-F]{24}$'")) <= 2:
+                    break
+            connection.execute(text("ALTER SYSTEM RESET wal_recycle"))
+            connection.execute(text("SELECT pg_reload_conf()"))
+    except Exception as exc:
+        say(f"The database's write-ahead log could not be cleared: {type(exc).__name__}.")
+
+
+def forget_settings(environ=None, say=print):
+    """Only what is about this machine stays in the Mac app's `.env`. An installation moved in from Docker keeps its API keys, bot token
+    and passwords there, and they would come back on the next start. A checkout's `.env` is a developer's own and is left alone."""
+    environ = os.environ if environ is None else environ
+    folder = environ.get("AXIOM_CONFIG_DIR")
+    path = Path(folder) / ".env" if folder else None
+    if not path or not path.is_file():
+        return []
+    try:
+        lines = path.read_text().splitlines()
+        kept = [line for line in lines if line.startswith("#") or not line.strip() or MACHINE_SETTINGS.fullmatch(line.split("=", 1)[0].strip())]
+        if len(kept) != len(lines):
+            temporary = path.with_name(".env.erasing")
+            descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(descriptor, "w") as f:
+                f.write("\n".join(kept) + "\n")
+            os.replace(temporary, path)
+            say(f"Removed {len(lines) - len(kept)} saved settings from the settings file.")
+    except OSError:
+        say("Could not clean the settings file.")
+        return [".env"]
+    return []
 
 
 def remove(path, say=None, tries=5):
@@ -163,7 +270,7 @@ def profiles(config):
     return sorted(found)
 
 
-def run(config, *, after_pid=0, say=print, backups=None):
+def run(config, *, after_pid=0, say=print, backups=None, logs=None):
     """Delete everything, in this order: wait for the application to be gone, close the Chromes, empty the database, the files, the
     copies. Returns a list of what could not be removed (empty when all went)."""
     problems = []
@@ -197,13 +304,18 @@ def run(config, *, after_pid=0, say=print, backups=None):
         remove(state / name)
     folder = Path(backups) if backups else backup_folder()
     if folder.exists():
-        for copy in folder.glob(BACKUP_PREFIX + "*.dump"):
+        # Every database copy in AXIOM's own folder, whatever it was called: a copy made by hand (`axiom backup name.dump`) holds
+        # the same employer passwords and answers.
+        for copy in [*folder.glob("*.dump"), *folder.glob("*.dump.partial")]:
             if not remove(copy, say):
                 problems.append(copy.name)
         try:
             folder.rmdir()  # Only when nothing else of the owner's is in it.
         except OSError:
             pass
+    problems += forget_settings(say=say)
+    for where in [Path(logs)] if logs else log_folders(config):
+        problems += clear_logs(where, say)
     say("Done." if not problems else "Done, except: " + ", ".join(problems))
     return problems
 

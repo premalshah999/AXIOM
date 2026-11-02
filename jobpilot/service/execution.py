@@ -131,7 +131,9 @@ class ExecutionMixin:
                 return False
             run.state, run.started_at, run.finished_at, run.reason = "queued", None, None, ""
             checkpoint = result.get("browser_checkpoint")
-            run.packet = {**run.packet, **({"browser_checkpoint": checkpoint} if checkpoint else {})}
+            from ..licensing import returned_mark
+
+            run.packet = {**run.packet, **returned_mark(self.config), **({"browser_checkpoint": checkpoint} if checkpoint else {})}
             job.status = "queued"
             from ..application_slots import release_slot
 
@@ -228,6 +230,24 @@ class ExecutionMixin:
                     require_intake(s, row.job_id)
                 except QueueBlocked as exc:
                     gate = host_health.Gate(0, "deployment_hold", str(exc))
+                if not s.get(Job, row.job_id).demo:
+                    from ..licensing import CONTINUES, require_license
+
+                    try:
+                        # A run queued before the key ran out waits here, holding no browser, and starts once a key is entered.
+                        # What continues an application already started (what admission found, a source run, a matched email, a
+                        # check of an earlier submission) is never held by it.
+                        require_license(
+                            self.config,
+                            continuing=bool(
+                                row.packet.get(CONTINUES)
+                                or row.packet.get("source_run_id")
+                                or row.packet.get("email_wait_resume")
+                                or row.packet.get("verification_only")
+                            ),
+                        )
+                    except QueueBlocked as exc:
+                        gate = host_health.Gate(0, "license", str(exc))
                 from ..application_budget import require_allowance
 
                 try:
@@ -340,9 +360,11 @@ class ExecutionMixin:
                 break
             await asyncio.sleep(idle)
         started = time.monotonic()
+        engine = None
         try:
             with self.db.session() as s:
                 self.check_cooldown(s, s.get(Job, run["job_id"]))
+            from ..pipeline_comparison import budget_class
             from ..specialist import pool_boost
             from ..tiers import clamp, time_budget
 
@@ -352,7 +374,7 @@ class ExecutionMixin:
                 max(self.config.application_timeout, self.config.multipage_timeout),
                 clamp((run.get("packet") or {}).get("runner_tier", 1)),
                 job.get("ats", ""),
-                boost=pool_boost(self.config, (run.get("packet") or {}).get("worker_pool")),
+                boost=pool_boost(self.config, budget_class(run.get("packet") or {})),
             )
             run_budget = max(outer, self.config.application_timeout, self.config.multipage_timeout) + 45
             lifetime = (run.get("packet") or {}).get("application_deadline")
@@ -421,6 +443,10 @@ class ExecutionMixin:
                 "locations": [f"{Path(f.filename).name}:{f.lineno}:{f.name}" for f in frames[-5:]],
             }
             self._trace_failure(run_id, result["diagnostics"])
+        # Cancelled with no result of its own, the run still looked at its page (BrowserEngine.settle_possible_send): a form may have gone out,
+        # and a timed-out run is one a retry starts again.
+        if (settled := getattr(engine, "possible_send_end", None)) and result.get("state") in {"waiting_browser", "timed_out", "failed"}:
+            result = {**{k: v for k, v in result.items() if k != "recovery_cause"}, **settled}
         if result.get("state") != "stopped" or not self.return_to_queue(run_id, result, time.monotonic() - started):
             self.complete(run_id, result, time.monotonic() - started)
 

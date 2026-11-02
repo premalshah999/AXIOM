@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { plainError } from "./format";
 
 // Abortable, non-overlapping polling that pauses while the tab is hidden and
 // keeps the last good data on transient errors.
@@ -167,7 +168,7 @@ export function useAction() {
         return result;
       } catch (e) {
         if ((e as Error).name !== "AbortError")
-          notify("error", (e as Error).message);
+          notify("error", plainError((e as Error).message));
         return undefined;
       } finally {
         if (live.current) setPending(null);

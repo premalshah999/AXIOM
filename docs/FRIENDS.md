@@ -10,7 +10,8 @@ text file inside the disk image, beside the app and the Applications folder: `de
 >
 > The first time you open it, the Mac says "Apple could not verify AXIOM". That is normal: I haven't paid Apple to approve it.
 > Click Done. Then open the Apple menu, System Settings, Privacy & Security, scroll down to Security, and click Open Anyway next to
-> "AXIOM was blocked". Enter your Mac password, then open AXIOM again and click Open or Open Anyway if it asks. You only do this once.
+> "AXIOM was blocked". Enter your Mac password, then open AXIOM again and click Open or Open Anyway if it asks. You only do this once
+> for each version.
 >
 > You need a Mac with Apple silicon on macOS 15 or newer, a Gmail account, and an AI key from openrouter.ai (AXIOM walks you through
 > both; you pay OpenRouter directly, and $5 of credit usually covers a few hundred applications). If anything goes wrong, choose Help, Copy Diagnostics in AXIOM
@@ -49,14 +50,18 @@ closed on the employers' sites). Copies the friend saved elsewhere by hand, and 
 
 ## Publishing an update
 
-The app asks GitHub once a day for the newest release (`https://api.github.com/repos/premalshah999/AXIOM/releases/latest`). Publish the
+The app asks GitHub once a day for the newest release (`https://api.github.com/repos/premalshah999/AXIOM/releases/latest`), and says
+nothing unless there is one: a private repository and one with nothing published both answer 404. Help, Check for Updates then says
+"No update to offer", because nothing there can make this copy the newest. Publish the
 disk image as a release named for the version (`v1.1.0`); the number must be larger than `version` in `pyproject.toml` at build time. A
-friend then sees "AXIOM 1.1.0 is available" with a button that opens the release page, and Help, Check for Updates does the same on
-request. The app never downloads or replaces itself: the friend drags the new version over the old one, and their data stays.
+friend then sees "AXIOM 1.1.0 is available" with a button that opens the release page, once for each version, and Help, Check for
+Updates does the same on request. The app never downloads or replaces itself: the friend quits AXIOM, drags the new version over the old one, and their data
+stays. An unsigned new version is a new app to Gatekeeper, so the first-open steps may come back once; the update message and the disk
+image's text both say so. That has not been walked on a second Mac.
 
 ## When a copy is incomplete
 
 `desktop/build.sh` writes `Resources/install-manifest.txt` (every file and its size). At each start the window checks it, and a copy
-that stopped part way shows "AXIOM was not copied completely" with what to do, instead of a Python error. A drag in Finder is the
+that stopped part way, the manifest itself included, shows "AXIOM was not copied completely" with what to do, instead of a Python error. A drag in Finder is the
 supported way to install; the 2026-11-01 failure came from a script in a terminal, which macOS may treat as a program modifying an app
 (App Management). That cause is not proven.

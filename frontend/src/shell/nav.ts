@@ -73,7 +73,7 @@ export const ALL_ITEMS: NavItem[] = [
 // Each page's tabs. The palette offers them as places to jump to; the pages render from these.
 export const PAGE_TABS: Partial<Record<View, TabItem[]>> = {
   ledger: [
-    { id: "confirmed", label: "Applied" },
+    { id: "confirmed", label: "Confirmed" },
     { id: "problems", label: "What went wrong" },
     { id: "failed", label: "Couldn't apply" },
     { id: "not", label: "Not applying" },
@@ -95,6 +95,14 @@ export const PAGE_TABS: Partial<Record<View, TabItem[]>> = {
     { id: "system", label: "Advanced" },
   ],
 };
+
+/** Settings' sections. The license key is one of them only in a build that asks for a key (license.tsx). */
+export function settingsTabs(licensed: boolean): TabItem[] {
+  const tabs = PAGE_TABS.settings!;
+  if (!licensed) return tabs;
+  const after = tabs.findIndex((t) => t.id === "account") + 1;
+  return [...tabs.slice(0, after), { id: "license", label: "License key" }, ...tabs.slice(after)];
+}
 
 /** Whether `item` is where `route` is. Routes are canonical, so one page is lit per view; the editor belongs to Resumes. */
 export function isActive(item: NavItem, route: Route): boolean {

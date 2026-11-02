@@ -7,7 +7,7 @@ from ..._store import norm
 from .. import ats, claims, gates
 from ..editor import Section
 from ..normal import refuse_reason
-from ..rules import live_bullets, live_entries, skill_items
+from ..rules import bullet_window, live_bullets, live_entries, skill_items
 
 DESCRIPTORS = {"Personal project", "Open source", "Internal tool", "Research"}
 VENDORS = {
@@ -74,6 +74,47 @@ def in_posting(posting, tool):
 
 # A draft's figure is an inspired value, and says so on the resume itself: the employer sees the PDF, not the app's notes.
 TARGET = re.compile(r"\[target:[^\]]{1,90}\]", re.I)
+# Names that hold a digit and state no result: GPT-4, Python 3, S3. Every other digit outside a target bracket counts as a figure.
+# A tight rule can't tell an ordinary number from a result, so this errs on refusing: a refused bullet gets a repair, and then the
+# original project keeps its place.
+NAMES = re.compile(
+    r"\b(?:Python|PHP|Perl|Ruby|Rust|Scala|Swift|Kotlin|Vue|Rails|Django|React|Spark|Hadoop|Redis|MySQL|HTTP|TLS|OAuth|SOC)[ /-]?\d(?:\.\d+)*\b"
+    r"|\b(?:Java|Node|Node\.js|Angular|Postgres|PostgreSQL|Ubuntu|Windows|Fedora)[ -]?\d{1,2}(?:\.\d+)*\b"
+    r"|\b(?i:gpt|llama|claude|gemini|mistral|phi|qwen|bert|yolo)[ -]?v?\d(?:\.\d+)?[a-z]?\b|\b(?i:resnet)[ -]?\d{2,3}\b"
+    r"|\b[A-Z]{2,}[A-Za-z]*-\d[\w.]*"  # SHA-256, ISO-27001, COVID-19, UTF-8
+    r"|\b[A-Z]-\d{1,2}\b"  # S-1, W-2, K-12
+    # A letter leads the digit: S3, EC2, K8s, Neo4j, OAuth2, x86. "x10", "under200ms" and "recall95" are figures with letters in front.
+    r"|\b(?![xX](?!86\b|64\b)\d)"
+    r"(?!(?i:under|over|sub|top|upto|above|below|near|less|more|about|around|approx|min|max|recall|score|rate|cost|uptime|latency)\d)"
+    r"[A-Za-z][A-Za-z+#]{0,6}\d[A-Za-z0-9]*\b"
+    r"|\b(?:10-[KQ]|8-K)\b|\bISO \d{3,5}\b|\b(?:Microsoft|Office) 365\b"
+)
+FIGURE = re.compile(
+    r"\d|[%$€£]"
+    r"|\b(?:percent(?:age)?s?|pct|basis points?|bps|zero|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen"
+    r"|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundreds?|thousands?|millions?|billions?|trillions?|dozens?"
+    r"|twice|thrice|half|(?:two|three|four|five|six|seven|eight|nine|ten|twenty|hundred|thousand)-?fold"
+    r"|doubl(?:e|es|ed|ing)(?![- ](?:count|entr|check))|tripl(?:e|es|ed|ing)|quadrupl(?:e|es|ed|ing))\b"
+    r"|\b(?:one|two|three|four|five|six|seven|eight|nine)[ -](?:times|seconds?|minutes?|hours?|days?|weeks?|months?|years?)\b",
+    re.I,
+)
+# Past tense says the work is done, wherever it sits in the bullet. A present-tense description, "Compares...", stays allowed.
+COMPLETED = re.compile(
+    r"\b(?:(?<!pre-)built(?!-in\b)|developed|deployed|shipped|launched|achieved|reduced|increased|improved|saved|delivered|created"
+    r"|implemented|completed|finished|rolled out|migrated|optimi[sz]ed|streamlined|boosted|eliminated|exceeded|grew|won(?!')|earned|led"
+    r"|spearheaded|architected|drove|wrote|ran|began|gave|took|analy[sz]ed|used(?! (?:cars?|vehicles?|goods|books?)\b)"
+    r"|designed(?! (?:so|to|for|around)\b)|was|were|had|did|(?:has|have) (?:been|[a-z]+ed))\b",
+    re.I,
+)
+# Any other verb in the past tense, by the "the" it acts on: "parsed the filings", though not "parsed filings" further in.
+ACTED_ON = re.compile(r"\b[a-z]+(?<!e)(?<!mb)ed (?:a|an|the|each|every|all|its|their)\b", re.I)
+OPENED_PAST = re.compile(r"^[A-Z][a-z]+(?<!e)(?<!mb)ed\b")
+# What can open a description as a plain adjective: "Distributed rate limiter", though never "Distributed the limiter".
+ADJECTIVES = frozenset(
+    "aggregated annotated automated cached containerized curated distributed embedded federated guided labeled labelled layered "
+    "localized managed normalized randomized scheduled segmented shared simulated stratified structured supervised synchronized "
+    "tiered tokenized typed unified unstructured unsupervised versioned weighted".split()
+)
 FUTURE = re.compile(r"\b(?:will|would|should|shall)\s+(?:also\s+)?([a-z]+)", re.I)
 COMMAND = re.compile(
     r"^(Add|Analy[sz]e|Benchmark|Build|Check|Collect|Compare|Create|Design|Develop|Document|Evaluate|Implement|Make|Map|Measure|"
@@ -100,18 +141,108 @@ def describe(bullet):
 
     def said(match):
         opening = match.start() == 0 or bullet[: match.start()].rstrip()[-1:] in ".:;"
-        word = third_person(match[1])
+        # "Will shipped" stays "Shipped", so the check still refuses it. Inflected, it would read "Shippeds" and pass.
+        finished = COMPLETED.fullmatch(match[1]) or re.search(r"(?<!e)(?<!mb)ed$", match[1], re.I)
+        word = match[1] if finished else third_person(match[1])
         return word.capitalize() if opening else word
 
     text = FUTURE.sub(said, bullet.strip())
     return COMMAND.sub(lambda m: third_person(m[1]), text)
 
 
-def normalize_proposals(proposals):
+# A plan holds up to three drafts of up to eight bullets (schema.py).
+MOST_DRAFTS, MOST_BULLETS = 3, 8
+# Roughly what the default 2000-token reply holds. A fix that would run past it asks for fewer wordings, then fewer bullets.
+FIX_REPLY_CHARS = 5000
+# Shorter words that say the same thing: a bullet a few characters over needs no model, and no draft is lost for it.
+TIGHTER = (
+    (re.compile(r"\.$"), ""),
+    (re.compile(r",(?= and\b| then\b| so\b)"), ""),
+    (re.compile(r"\bin order to\b", re.I), "to"),
+    (re.compile(r"\bso that\b", re.I), "so"),
+    (re.compile(r"\bas well as\b", re.I), "and"),
+    (re.compile(r"\bwithout having to\b", re.I), "without"),
+)
+
+
+def stated_figure(text):
+    """The first number or figure outside a [target: ...] bracket, if any. Names such as GPT-4 don't count."""
+    found = FIGURE.search(NAMES.sub(" ", TARGET.sub(" ", text)))
+    return found.group(0) if found else None
+
+
+def claimed_work(text, opens_a_bullet=True):
+    """The first word saying the work is already done, if any. All capitals is a name: "LED display"."""
+    for found in COMPLETED.finditer(text):
+        if not found.group(0).isupper():
+            return found.group(0)
+    if not opens_a_bullet:
+        return None
+    acted = ACTED_ON.search(text)
+    if acted:
+        return acted.group(0)
+    opening = OPENED_PAST.match(text.strip())
+    if opening and opening.group(0).lower() not in ADJECTIVES:
+        return opening.group(0)
+    return None
+
+
+def project_slots(doc):
+    """The resume's own projects a draft can take the place of, in order. A project with no bullets has no size to keep."""
+    slots = [
+        e
+        for s in doc.sections
+        if s.include and s.kind == "projects"
+        for e in live_entries(s)
+        if 1 <= len(live_bullets(e)) <= MOST_BULLETS
+    ]
+    return slots[:MOST_DRAFTS]
+
+
+def project_shapes(doc):
+    """Each bullet's allowed (fewest, most) characters in those projects: a draft takes one's place, at its size."""
+    return [[bullet_window(b.text) for b in live_bullets(e)] for e in project_slots(doc)]
+
+
+def shape_problems(p, shape):
+    """The owner's rule for every bullet: the same count as the project it replaces, and the same length or up to 10% shorter."""
+    if len(p.bullets) != len(shape):
+        return [f"{p.title}: has {len(p.bullets)} bullets, write exactly {len(shape)}, like the project it replaces"]
+    problems = []
+    for i, (b, (low, high)) in enumerate(zip(p.bullets, shape)):
+        n = len(b.strip())
+        if n > high:
+            problems.append(f"{p.title}: bullet {i + 1} has {n} characters, cut {n - high} to {n - low} so it has {low} to {high}")
+        elif n < low:
+            problems.append(f"{p.title}: bullet {i + 1} has {n} characters, add {low - n} to {high - n} so it has {low} to {high}")
+    return problems
+
+
+def shape_issues(proposals, shapes):
+    return [problem for p, shape in zip(proposals, shapes) for problem in shape_problems(p, shape)]
+
+
+def tighten(text, low, high):
+    """The same bullet a little shorter when that lands in its window. Otherwise it is left for the repair, word for word."""
+    shorter = text.strip()
+    for pattern, said in TIGHTER:
+        if len(shorter) <= high:
+            break
+        shorter = pattern.sub(said, shorter)
+    return shorter if low <= len(shorter) <= high else text
+
+
+def normalize_proposals(proposals, shapes=()):
     """Shape is arithmetic, so code settles it. Order by proof point, give each proposal its own, keep one third bullet, and
-    word each bullet as a description."""
+    word each bullet as a description. A resume with its own projects sets the count instead, and no more drafts than it has."""
     for p in proposals:
         p.bullets = [describe(b) for b in p.bullets]
+    if shapes:
+        ordered = sorted(proposals, key=lambda p: p.proof_point)[: len(shapes)]
+        for i, (p, shape) in enumerate(zip(ordered, shapes)):
+            p.proof_point = min(i, 2)
+            p.bullets = [tighten(b, *window) for b, window in zip(p.bullets, shape)]
+        return ordered
     ordered = sorted(proposals, key=lambda p: p.proof_point)
     free = [i for i in range(len(ordered)) if i not in {p.proof_point for p in ordered}]
     seen = set()
@@ -121,10 +252,53 @@ def normalize_proposals(proposals):
             p.proof_point = free.pop(0)
         seen.add(p.proof_point)
         if len(p.bullets) > 2:
-            if third:
-                p.bullets = p.bullets[:2]
+            p.bullets = p.bullets[: 2 if third else 3]
             third = True
     return sorted(ordered, key=lambda p: p.proof_point)
+
+
+def shape_request(proposals, shapes, history, posting):
+    """The short request for one bounded fix: only the bullets that miss, each with its exact numbers. A draft that already
+    fails a truth check is going to be left out, so nothing is spent on it."""
+    wanted = []
+    for d, (p, shape) in enumerate(zip(proposals, shapes)):
+        if proposal_problems(p, history, posting):
+            continue
+        for i, (low, high) in enumerate(shape):
+            text = p.bullets[i].strip() if i < len(p.bullets) else ""
+            n = len(text)
+            if low <= n <= high:
+                continue
+            change = f"cut {n - high} to {n - low} characters" if n > high else f"add {low - n} to {high - n} characters"
+            wanted.append(
+                {"draft": d, "title": p.title, "data_source": p.data_source, "tools": p.tools, "bullet": i, "text": text,
+                 "chars": n, "min_chars": low, "max_chars": high, "aim_chars": (low + high) // 2, "change": change}
+            )
+    room = 0
+    fits = []
+    for item in wanted:
+        if room + item["max_chars"] > FIX_REPLY_CHARS:
+            break
+        room += item["max_chars"]
+        fits.append(item)
+    return {"bullets": fits, "wordings_per_bullet": max(1, min(3, FIX_REPLY_CHARS // max(room, 1)))}
+
+
+def apply_shape_fix(proposals, shapes, fix, history, posting):
+    """Each bullet takes the first wording that lands in its window and breaks no truth check. Otherwise it stays as it was."""
+    for item in sorted(fix.bullets, key=lambda x: (x.draft, x.bullet)):
+        if item.draft >= min(len(proposals), len(shapes)):
+            continue
+        p, shape = proposals[item.draft], shapes[item.draft]
+        if item.bullet >= len(shape) or item.bullet > len(p.bullets):
+            continue
+        low, high = shape[item.bullet]
+        for wording in item.wordings:
+            text = tighten(describe(gates.sanitize(wording)), low, high)
+            trial = p.model_copy(update={"bullets": [*p.bullets[: item.bullet], text, *p.bullets[item.bullet + 1 :]]})
+            if low <= len(text) <= high and not proposal_problems(trial, history, posting):
+                p.bullets = trial.bullets
+                break
 
 
 def proposal_problems(p, history, posting):
@@ -146,12 +320,14 @@ def proposal_problems(p, history, posting):
         problems.append(f"{p.title}: remove filler")
     if re.search(r"independent deploys|team velocity|onboarding friction", combined, re.I):
         problems.append(f"{p.title}: a solo project needs solo obstacles")
-    if sum(bool(gates.ANY_METRIC.search(b)) for b in p.bullets) > 1:
+    if sum(len(TARGET.findall(b)) for b in p.bullets) > 1:
         problems.append(f"{p.title}: at most one headline metric")
-    if any(gates.ANY_METRIC.search(TARGET.sub("", b)) for b in p.bullets):
-        problems.append(f"{p.title}: mark unmeasured results [target: ...]")
-    if any(re.match(r"Built|Deployed|Achieved|Reduced|Shipped|Saved", b) for b in p.bullets):
-        problems.append(f"{p.title}: proposed work must not claim completed work")
+    figure = next(filter(None, map(stated_figure, [p.title, *p.bullets])), None)
+    if figure:
+        problems.append(f'{p.title}: mark unmeasured results [target: ...], with no other number or figure ("{figure}")')
+    claim = claimed_work(p.title, opens_a_bullet=False) or next(filter(None, map(claimed_work, p.bullets)), None)
+    if claim:
+        problems.append(f'{p.title}: proposed work must not claim completed work ("{claim}"), write in the present tense')
     if inputs[norm(p.data_source)] >= 3 and any(
         norm(d["data_source"]) == norm(p.data_source)
         and (d["archetype"] == p.archetype or d["metric_shape"] == p.metric_shape)
@@ -162,26 +338,35 @@ def proposal_problems(p, history, posting):
     return problems
 
 
-def proposal_issues(proposals, history, posting):
+def proposal_issues(proposals, history, posting, shapes=()):
     problems = []
-    if len({p.archetype for p in proposals}) != 3:
-        problems.append("Choose three distinct project archetypes")
-    if [p.proof_point for p in proposals] != [0, 1, 2]:
-        problems.append("Order proposals by proof point 0, 1, 2, exactly once each")
-    counts = [len(p.bullets) for p in proposals]
-    if sum(counts) not in (6, 7) or counts.count(3) > 1:
-        problems.append("Use 2,2,2 or 2,2,3 proposal bullets")
+    if len({p.archetype for p in proposals}) != len(proposals):
+        problems.append("Choose distinct project archetypes")
+    if shapes:
+        if len(proposals) < len(shapes):
+            problems.append(f"Write {len(shapes)} proposals, one for each item of project_shapes")
+        problems += shape_issues(proposals, shapes)
+    else:
+        if len(proposals) != 3:
+            problems.append("Choose three distinct project archetypes")
+        if [p.proof_point for p in proposals] != [0, 1, 2]:
+            problems.append("Order proposals by proof point 0, 1, 2, exactly once each")
+        counts = [len(p.bullets) for p in proposals]
+        if sum(counts) not in (6, 7) or counts.count(3) > 1:
+            problems.append("Use 2,2,2 or 2,2,3 proposal bullets")
     for p in proposals:
         problems += proposal_problems(p, history, posting)
     return problems
 
 
-def keep_sound(proposals, history, posting):
-    """After the one repair: the drafts that pass every check, and why the others were left out. A failed draft never reaches
-    a resume, and it no longer costs the person the rest of the tailoring (every real-model run failed that way, 2026-11-01)."""
+def keep_sound(proposals, history, posting, shapes=()):
+    """After the repairs: the drafts that pass every check, and why the others were left out. A failed draft never reaches a
+    resume, and it no longer costs the person the rest of the tailoring (every real-model run failed that way, 2026-11-01)."""
     kept, dropped, archetypes = [], [], set()
-    for p in proposals:
+    for i, p in enumerate(proposals):
         problems = proposal_problems(p, history, posting)
+        if i < len(shapes):
+            problems += shape_problems(p, shapes[i])
         if p.archetype in archetypes:
             problems.append(f"{p.title}: repeats another draft's archetype")
         if problems:

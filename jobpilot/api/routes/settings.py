@@ -49,29 +49,46 @@ def router(service) -> APIRouter:
     db, config = service.db, service.config
     r = APIRouter()
 
-    @r.get("/api/connections")
-    def connections_status():
+    def connections_view():
+        """What the page shows, with the model that really answers: the two roles under Advanced are what the engine reads."""
         from ... import connections
+        from ...agent_settings import current
 
-        return connections.status(config)
+        status = connections.status(config)
+        try:
+            used = current(db, config).models.answers
+        except ValueError:  # A row this build cannot read must not take the keys page with it.
+            return status
+        return {**status, "provider": used, "model_ready": bool(getattr(config, used + "_api_key", ""))}
 
-    @r.put("/api/connections")
-    def save_connections(data: ConnectionsUpdate):
+    def save_values(values):
         from ... import connections
         from ...config import settings
 
-        try:
-            connections.save(config, data.values)
-        except ValueError as exc:
-            raise HTTPException(400, str(exc)) from None
+        connections.save(config, values)
         cached = settings()
         if cached is not config:
             connections.apply(cached)  # Code that reads settings() directly sees the same keys at once.
+
+    @r.get("/api/connections")
+    def connections_status():
+        return connections_view()
+
+    @r.put("/api/connections")
+    def save_connections(data: ConnectionsUpdate):
+        try:
+            save_values(data.values)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from None
+        if "llm_provider" in data.values:
+            from ...agent_settings import follow_provider
+
+            follow_provider(db, config.llm_provider)
         if "daily_application_limit" in data.values:
             from ...autopilot import apply_daily_limit
 
             apply_daily_limit(db, config.daily_application_limit)
-        return connections.status(config)
+        return connections_view()
 
     @r.post("/api/connections/{name}/test")
     async def test_connection(name: str):
@@ -177,7 +194,7 @@ def router(service) -> APIRouter:
         tiers["job_token_cap"] = data.job_token_cap
         db.set_setting("runner_tiers", tiers)
         pacing = dict(db.get_setting(LIMIT_KEY, {}) or {})
-        pacing.update(limit=data.company_limit, reason="Set by the owner in Setup › System")
+        pacing.update(limit=data.company_limit, reason="Set by you in Settings › Applying")
         db.set_setting(LIMIT_KEY, pacing)
         return get_limits()
 
@@ -246,7 +263,12 @@ def router(service) -> APIRouter:
         from ...agent_settings import save
 
         try:
-            return save(db, config, data)
+            saved = save(db, config, data)
+            # Ranking, Telegram and the checks before a run read the main model's key: with another provider chosen here and none
+            # saved for the old one, the board never ranked a job.
+            if data.models.answers != config.llm_provider:
+                save_values({"llm_provider": data.models.answers})
+            return saved
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from None
 

@@ -638,6 +638,18 @@ FINAL = re.compile(
     r"|\babsenden\b|bewerbung (?:abschicken|einreichen)|envoyer ma candidature|\bsoumettre\b",
     re.IGNORECASE,
 )
+# Phenom's application wizard: each step's forward button is id="next" and reads "Next Step"; the last one, on an address naming its review
+# step (&stepname=applicationReview), is atm-id="submit-button" and reads "Continue". Its label says nothing, so it was clicked as a step and its
+# reCAPTCHA token delivered as a step's, and the callback of that token is what posts the application (Humana, 2026-11-01: posted unarmed, and the
+# run ended as "the click timed out, nothing sent" with the button disabled by the send). The platform's mark and the address together.
+REVIEW_ADDRESS = re.compile(r"[?&]step(?:name)?=[^&#]*review", re.I)
+
+
+def final_by_marking(control, url):
+    """A forward-worded control that the application's own markup and address say is its submit."""
+    return str(control.get("atm_id") or "").casefold() == "submit-button" and bool(REVIEW_ADDRESS.search(str(url or "")))
+
+
 # SuccessFactors application pages (classic career site, the candidate portal wizard, Career Site
 # Builder's apply route). Their bare "Apply" is the application submit, never the posting's "Apply now".
 SF_APPLICATION_PAGE = re.compile(
@@ -786,6 +798,9 @@ OFFSCREEN_FRAME_JS = """e => {
 # iframe's src ("/jobs/login?step=email&h-captcha-response=P1_..."); that query read as a CAPTCHA frame dropped Noblis's
 # whole profile from uploads and page evidence, so the renamed resume never verified and every pass uploaded it again
 # (2026-10-26..27). CAPTCHA frames name their provider in the host or path.
+# A visible frame at least this large (px, about 200 x 200) is part of the application, not a badge or a tracking pixel:
+# when it cannot be read the page is not fully observed (see FormEngine._scan).
+APPLICATION_FRAME_MIN_AREA = 40_000
 FRAME_IDENTITY_JS = "e=>[e.title,e.id,(e.src||'').split(/[?#]/)[0].slice(0,200)].join(' ')"
 DEPENDENT_TYPES = {"radio", "radiogroup", "select", "dropdown", "pills", "checkbox", "combobox", "prompt"}
 
@@ -1875,13 +1890,29 @@ class FormSession:
 
     def note_survey(self, state):
         """This application's survey outcome for the answer rules: "launched" when the run opened the tax-credit survey, "finished" once the run
-        came back from it. A resolver without the attribute (a test double) simply has no record."""
-        if state == "launched" and getattr(self.resolver, "survey", "") == "finished":
+        came back from it, "declined" when it used the questionnaire's own way out. A decline stays: opening the survey again or coming back
+        from it finishes nothing, and "Did you complete the WOTC survey?" must not turn Yes. If this run also wrote answers on the survey, neither
+        word can be proved and it is "unproven", the person's to say. A resolver without the attribute (a test double) simply has no record."""
+        current = getattr(self.resolver, "survey", "")
+        if current == "unproven" or (state == "launched" and current == "finished"):
             return
+        if current == "declined" and state in {"launched", "finished"}:
+            if not any(record.get("external") for record in getattr(self, "ledger", {}).values()):
+                return
+            state = "unproven"
         try:
             self.resolver.survey = state
         except AttributeError:
             pass
+
+    async def launching_step_says_voluntary(self):
+        """Whether the step the survey is opened from calls it voluntary: whoever opens it, the guided flow or the model."""
+        from .adapters.base import survey_called_voluntary
+
+        try:
+            return survey_called_voluntary((await self.scan()).get("text", ""))
+        except Exception:
+            return False  # Unread is not voluntary.
 
     def assessment_tab_returned(self):
         """The launched survey's tab now shows the application's own host: its last link was the way back."""
@@ -2006,6 +2037,7 @@ class FormSession:
         frame_errors = []
         options = []
         for n, frame in enumerate(self.page.frames):
+            substantive = False  # a frame this large that cannot be read leaves the observation incomplete
             try:
                 if frame != self.page.main_frame:
                     if frame.is_detached() or PROVIDER_FRAME.search(frame.url or ""):
@@ -2020,6 +2052,8 @@ class FormSession:
                         continue
                     if not await owner.is_visible() or await owner.evaluate(OFFSCREEN_FRAME_JS):
                         continue
+                    box = await owner.bounding_box()
+                    substantive = bool(box and box["width"] * box["height"] >= APPLICATION_FRAME_MIN_AREA)
                 if observed_frames >= MAX_FRAMES:
                     break
                 observed_frames += 1
@@ -2048,7 +2082,9 @@ class FormSession:
                 ):
                     raise ValueError("scanner_payload")
             except Exception as exc:
-                frame_errors.append({"frame": n, "error_type": type(exc).__name__})
+                frame_errors.append(
+                    {"frame": n, "error_type": type(exc).__name__, **({"application_frame": True} if substantive else {})}
+                )
                 continue
             successful_frames += 1
             texts.append(data["text"])
@@ -2232,7 +2268,10 @@ class FormSession:
             "options": options,
             "owner_id": self.owner_id,
             "scan_success": bool(successful_frames),
-            "observation_failure": not bool(successful_frames),
+            # A readable page beside an application frame that could not be read is not the whole application: its
+            # required fields may be in the frame (GSI's Paycom form, CODEX_DIAGNOSTICS_FOLLOWUP). Verification and the
+            # model-visible observation both treat it as a failed read, never as an empty or complete form.
+            "observation_failure": not bool(successful_frames) or any(e.get("application_frame") for e in frame_errors),
             "frame_errors": frame_errors,
         }
         revision_hash = fingerprint(obs, revision=True)
@@ -2245,15 +2284,18 @@ class FormSession:
         if not successful_frames and self.page.is_closed():
             # A crashed or closed tab never recovers in place; fail fast so the run is retried.
             raise BrowserTabClosed("The application tab was closed")
-        if successful_frames:
+        if obs["observation_failure"]:
+            if not getattr(self, "_scan_failure_reported", False):
+                self._scan_failure_reported = True
+                self.emit(
+                    "observation_failure",
+                    "No application document could be inspected"
+                    if not successful_frames
+                    else "An application frame could not be inspected",
+                    {"frame_errors": frame_errors},
+                )
+        else:
             self._scan_failure_reported = False
-        elif not getattr(self, "_scan_failure_reported", False):
-            self._scan_failure_reported = True
-            self.emit(
-                "observation_failure",
-                "No application document could be inspected",
-                {"frame_errors": frame_errors},
-            )
         return obs
 
     def reset_document_verification(self):
@@ -5595,7 +5637,7 @@ class FormSession:
         final = [
             b
             for b in self.buttons.values()
-            if FINAL.search(b["label"])
+            if (FINAL.search(b["label"]) or final_by_marking(b, self.page.url))
             and not NOT_FINAL_SUBMIT.search(b["label"])
             and len(b["label"].split()) <= 6
             and not b.get("stepper")  # Dayforce's progress step "Submit" is not the button
@@ -6346,6 +6388,13 @@ class FormSession:
             raise ValueError(
                 "This informational policy link leaves the application. Fill its consent checkbox or use the acknowledgement dialog."
             )
+        watch = getattr(self, "posting_watch", None)
+        if watch and not auth_control:
+            from .posting_match import application_fields
+
+            asking = bool(application_fields({"fields": list(self.fields.values())}))
+            if watch.other_posting_link(button.get("href"), self.page.url, button["label"], asking=asking):
+                raise ValueError("That link opens a different posting. This run applies to its own job only; use this job's own controls.")
         from .history_editor_guard import education_save_context, education_saved
 
         education_context = education_save_context(self, before, button)
@@ -6377,7 +6426,7 @@ class FormSession:
             )
         )
         if (
-            FINAL.search(button["label"])
+            (FINAL.search(button["label"]) or final_by_marking(button, self.page.url))
             and not auth_control
             and not account_form
             and not posting_link
@@ -6451,6 +6500,7 @@ class FormSession:
             self.assessment_origin = urlsplit(opener.url).hostname or ""
             self.assessment_return = opener.url
             self.note_survey("launched")
+            self.survey_voluntary = await self.launching_step_says_voluntary()
         # A "Submit" that this guard allowed for a profile/account popup or a tax-credit
         # launcher must also pass the page's own click guard, or the click is silently
         # cancelled (Starbucks "Create your profile": the agent clicked Submit for minutes).
@@ -6600,9 +6650,11 @@ class FormSession:
         return after
 
     def evidence_context(self):
+        watch = getattr(self, "posting_watch", None)
         return {
             "job_id": getattr(self.resolver, "job", {}).get("id", ""),
             "run_id": getattr(self.resolver, "run_id", ""),
+            **({"posting_numbers": watch.numbers()} if watch else {}),
         }
 
     async def oracle_lists_job(self):

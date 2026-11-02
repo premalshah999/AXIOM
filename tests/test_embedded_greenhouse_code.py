@@ -119,7 +119,7 @@ async def embedded_engine(service, page, tmp_path, resume_pdf):
     await page.wait_for_selector("iframe")
     # The iframe document loads after the parent: wait for its frame and load, not a fixed time a loaded run can overrun.
     frame = None
-    for _ in range(200):
+    for _ in range(4000):
         frame = next((f for f in page.frames if f.url.startswith("https://job-boards.greenhouse.io/embed/job_app")), None)
         if frame is not None:
             break

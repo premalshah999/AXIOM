@@ -20,15 +20,19 @@ from ..db import record
 from ..ats import custom_like
 from ..email_alias import same_mailbox
 from .constants import LIVE
+from .extraction import RESET_URL
 from .extraction import UNBRANDED_MAX_CANDIDATES
 from .extraction import UNBRANDED_SEARCH_TERMS
+from .extraction import VERIFY_URL
 from .extraction import extract_message
 from .extraction import latest_employer_code
 from .extraction import names_employer
 from .extraction import newest_reset_link
 from .helpers import origin
 from .senders import EMPLOYER_SENDER_FAMILIES
+from .senders import GENERIC_LABELS
 from .senders import KNOWN_SENDERS
+from .senders import PUBLIC_MAIL_DOMAINS
 from .senders import decorated_senders
 from .senders import icims_names
 from .senders import oracle_pod
@@ -48,6 +52,91 @@ LAST_SEARCHES = 3
 # 180 s window closed and expired unclaimed; Allen Institute's link (2026-10-30) matched 5 s after its run parked and the
 # resume was still retrying when the window ended. A reset link outlives a code by hours.
 MATCH_HOLD_SECONDS = {"code": 600, "auto": 600, "link": 1800, "password_reset": 1800}
+
+
+# Hosts that belong to one employer alone on a platform that gives each a host of its own. A link to exactly such an origin
+# in an authenticated mail addressed to the applicant, inside a request window, is the employer's own mail whatever domain
+# sent it. The shared hosts (jobs.lever.co, job-boards.greenhouse.io, myjobs.adp.com, career4.successfactors.com) are not here:
+# many employers link to those.
+TENANT_HOSTS = {
+    "workday": re.compile(r"[a-z0-9-]+\.wd\d+\.myworkdayjobs\.com"),
+    "eightfold": re.compile(r"[a-z0-9-]+\.eightfold\.ai"),
+    "taleo": re.compile(r"[a-z0-9-]+\.taleo\.net"),
+    "avature": re.compile(r"[a-z0-9-]+\.avature\.net"),
+}
+# A first label that is the platform's own front door, not a tenant: production's app.eightfold.ai/careers/job/...?domain=<employer>
+# serves many employers from one host.
+NOT_A_TENANT = GENERIC_LABELS | {"app", "portal", "login", "secure", "hire"}
+# How a link or reset mail from a sender nobody listed is found. Gmail matches whole words: "Password activation" (Avature) and
+# "Set up a user name and password" (Taleo) carry neither "reset" nor "verify".
+LEARNING_SUBJECTS = {
+    "password_reset": ["subject:reset", "subject:password", "subject:activation", "subject:activate"],
+    "link": ["subject:verify", "subject:verification", "subject:confirm", "subject:activate", "subject:activation", "subject:sign", "subject:password"],
+}
+
+
+def own_site(host):
+    """A host no platform in the registry owns: the employer's own career site, whatever platform runs behind it (jobs.ea.com is
+    Avature, apply.careers.microsoft.com is Eightfold)."""
+    from ..ats import REGISTRY
+
+    return not any(host == d or host.endswith("." + d) for platform in REGISTRY for d in platform.domains)
+
+
+def employer_only_host(ats, url):
+    """Whether this posting's host is used by this employer alone: a platform tenant's own host, or the employer's own career
+    site. A short link or a shared portal is nobody's own."""
+    from ..admission import SHARED_LINK_HOSTS, SHARED_PORTAL_HOSTS
+
+    try:
+        parts = urlsplit(url or "")
+        host = (parts.hostname or "").lower()
+    except ValueError:
+        return False
+    if parts.scheme not in {"https", "http"} or not host or host in SHARED_LINK_HOSTS | SHARED_PORTAL_HOSTS:
+        return False
+    if own_site(host):
+        return True
+    pattern = TENANT_HOSTS.get(ats)
+    return bool(pattern and pattern.fullmatch(host)) and host.split(".")[0] not in NOT_A_TENANT
+
+
+def another_employer_on_site(session, job, url):
+    """A job of another company on this very origin: a career-site host the registry does not know and several employers use.
+    Its links say nothing about whose mail it is. A wrong application needs a second job in this database, so looking there
+    closes the case on any install."""
+
+    def squashed(name):
+        return re.sub(r"[^a-z0-9]+", "", str(name or "").casefold())
+
+    mine = squashed(job.company)
+    others = session.scalars(select(Job.company).where(Job.url.like(origin(url) + "/%"), Job.id != job.id).distinct())
+    return any(squashed(name) and squashed(name) != mine for name in others)
+
+
+def can_learn_sender(session, job, posting, rule, kind):
+    """Whether a link in this window can prove a sender nobody listed (employer_step): only on the posting's own origin, on a
+    host that belongs to this employer alone. Never a code window: a code has no origin to check."""
+    if not job or not rule or kind not in {"link", "password_reset"}:
+        return False
+    try:
+        return bool(
+            employer_only_host(job.ats, posting)
+            and origin(posting) == rule.get("employer_origin")
+            and not (own_site((urlsplit(posting).hostname or "").lower()) and another_employer_on_site(session, job, posting))
+        )
+    except ValueError:
+        return False
+
+
+def employer_step(link, employer_origin):
+    """The proof itself: the mail's one link is on exactly the employer's origin and its address is a verification or reset
+    step. The links extract_message accepts can also be a click tracker or SAP's shared hosts (they lead on to the employer once
+    the sender is known), and a job alert's link to a posting on the site is no proof either."""
+    try:
+        return origin(link) == employer_origin and bool(VERIFY_URL.search(link) or RESET_URL.search(link))
+    except ValueError:
+        return False
 
 
 def sf_tenant(session, job):
@@ -141,7 +230,13 @@ class PollingMixin:
                     proposed = c.expires
                     c.expires = self.window_deadline(run, c.expires)
                     owner_gone = not run or (run.state not in {"running", "submitting"} and not self.waiting_owner(run, c.id))
-                    if owner_gone or (
+                    if c.state == "consumed" and c.payload and owner_gone and proposed >= current:
+                        # A reset's link handed over and its application stopped (the app quit, the browser died) before it
+                        # said it had used it: kept sealed for that application's next attempt (reclaim) until its hold ends.
+                        # The hold is the application's, not the attempt's: the stopped run's own deadline does not end it.
+                        c.expires = proposed
+                        c.state, c.reason = "cancelled", "The application stopped after the email was handed over"
+                    elif owner_gone or (
                         c.expires < current
                         and (
                             c.state != "pending"
@@ -155,6 +250,11 @@ class PollingMixin:
                         c.state, c.payload = "expired", ""
                     elif c.expires < current:
                         last_chance.append(c.id)
+                for kept in s.scalars(
+                    select(MailChallenge).where(MailChallenge.state == "cancelled", MailChallenge.payload != "")
+                ):
+                    if kept.expires < current:
+                        kept.payload = ""  # the hold on an unused mail has ended
                 ended = self.end_dead_email_waits(s)
                 pending = [
                     record(c)
@@ -233,18 +333,12 @@ class PollingMixin:
                             peer = s.get(Job, peer_run.job_id) if peer_run else None
                             if peer and peer.ats == "icims" and origin(peer.url) != origin(job.url):
                                 c["icims_peers"].extend(sorted(icims_names(peer.company, peer.url)))
-                    # Some Workday tenants send reset mail from their employer's
-                    # domain. An exact tenant link can prove that sender; a shared
-                    # wdN.myworkday.com origin cannot distinguish employers.
-                    c["sender_learning"] = bool(
-                        job
-                        and job.ats == "workday"
-                        and re.fullmatch(
-                            r"[a-z0-9-]+\.wd\d+\.myworkdayjobs\.com", urlsplit(job.url).hostname or ""
-                        )
-                        and origin(job.url) == (rule or {}).get("employer_origin")
-                        and c["kind"] in {"link", "password_reset"}
-                    )
+                    # Some employers send link and reset mail from a domain that names neither them nor their platform
+                    # (Workday tenants from the employer's domain, an unfamiliar sender on a custom career site). A link to
+                    # exactly the origin only this employer uses can prove that sender; a host shared by many employers
+                    # cannot (employer_only_host).
+                    posting = self.posting_url(job.url, s) if job else ""
+                    c["sender_learning"] = can_learn_sender(s, job, posting, rule, c["kind"])
                 if not rule:
                     self.outcome(c["id"], "cancelled", "Verification rule was removed or disabled")
                     continue
@@ -256,17 +350,6 @@ class PollingMixin:
                     terms = ["from:" + d for d in senders]
                     if c["ats"] == "oracle" and c["kind"] in {"code", "auto"}:
                         terms.append('subject:"confirm your identity"')
-                    if c["sender_learning"]:
-                        terms += (
-                            ["subject:reset"]
-                            if c["kind"] == "password_reset"
-                            else [
-                                "subject:verify",
-                                "subject:verification",
-                                "subject:confirm",
-                                "subject:activate",
-                            ]
-                        )
                     query = f"after:{int(c['since'])} to:{c['recipient']} " + "{" + " ".join(terms) + "}"
                     listed = await self.request(
                         c["mailbox_id"],
@@ -311,6 +394,23 @@ class PollingMixin:
                             outside = await self.outside_senders(c)
                         except Exception:
                             outside = None  # A diagnosis never fails the verification poll.
+                    if c["sender_learning"]:
+                        # Beside the sender search, not inside it: a busy mailbox's "confirm" and "password" mail must never
+                        # read as "too many candidates" and fail the window. The newest few are enough for a mail just asked for.
+                        worded = await self.request(
+                            c["mailbox_id"],
+                            "/messages",
+                            {
+                                "q": f"after:{int(c['since'])} to:{c['recipient']} "
+                                + "{"
+                                + " ".join(LEARNING_SUBJECTS[c["kind"]])
+                                + "}",
+                                "maxResults": UNBRANDED_MAX_CANDIDATES,
+                                "includeSpamTrash": "true",
+                            },
+                        )
+                        seen = {m["id"] for m in messages}
+                        messages += [m for m in worded.get("messages", []) if m["id"] not in seen]
                     for m in messages[: 20 + UNBRANDED_MAX_CANDIDATES]:
                         with self.db.session() as s:
                             if s.get(MailConsumption, c["mailbox_id"] + ":" + m["id"]):
@@ -345,11 +445,16 @@ class PollingMixin:
                                         "sender_domains": [domain],
                                         "link_origins": [rule["employer_origin"]],
                                     }
-                                    if extract_message(msg, proof_rule, c, identity_only=True):
+                                    proof = (
+                                        None
+                                        if domain in PUBLIC_MAIL_DOMAINS  # anyone can send from these
+                                        else extract_message(msg, proof_rule, c, identity_only=True)
+                                    )
+                                    if proof and employer_step(proof["value"], rule["employer_origin"]):
                                         token = extract_message(msg, proof_rule, c)
                                         if token:
                                             learned_domain = domain
-                            elif not token and diagnostics.get("rejection") == "sender" and c["employer_senders"]:
+                            if not token and diagnostics.get("rejection") == "sender" and c["employer_senders"]:
                                 learned_domain = self.family_learning(msg, rule, c)
                                 if learned_domain:
                                     token = extract_message(msg, {**rule, "sender_domains": [*rule["sender_domains"], *learned_domain]}, c)
@@ -475,7 +580,7 @@ class PollingMixin:
                                     Event(
                                         run_id=row.run_id,
                                         kind="mail_sender_learned",
-                                        message="Learned an authenticated sender from the exact Workday tenant link"
+                                        message="Learned an authenticated sender from a mail linking to the employer's own exact origin"
                                         if isinstance(learned_domain, str)
                                         else "Learned the employer's platform sender: its mail names the employer and no other open window's",
                                         data={"sender_domain": learned[0], "sender_domains": learned, "challenge_id": row.id},
@@ -581,11 +686,7 @@ class PollingMixin:
         checked[c["id"]] = time.monotonic()
         while len(checked) > 200:
             checked.pop(next(iter(checked)))
-        words = (
-            ["subject:reset", "subject:password"]
-            if c["kind"] == "password_reset"
-            else ["subject:verify", "subject:verification", "subject:confirm", "subject:activate", "subject:sign"]
-        )
+        words = LEARNING_SUBJECTS[c["kind"]]
         listed = await self.request(
             c["mailbox_id"],
             "/messages",

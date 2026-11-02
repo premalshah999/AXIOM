@@ -33,6 +33,9 @@ export function rulesWithDefaults(p: Profile): AnswerRules {
     };
   }
   return {
+    // First, so what this page has no field for survives a save: the setup guide's first-of-the-month date rule, the travel choice
+    // and each employer's country all went back to their defaults when anyone changed a rule here.
+    ...saved,
     education: saved.education || ["closest", "pick3", "other", "ask"],
     major_fallback: saved.major_fallback ?? "",
     source_order: saved.source_order ?? [],

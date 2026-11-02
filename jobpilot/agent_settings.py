@@ -70,7 +70,7 @@ def enabled(db, helper):
 
 def require(db, helper):
     if not enabled(db, helper):
-        raise AgentDisabled(f"The {helper} agent is disabled in System settings")
+        raise AgentDisabled(f"The {helper} helper is turned off under Settings > Advanced")
 
 
 def for_role(db, config, role):
@@ -90,6 +90,14 @@ def summary(db, config):
             for name in PROVIDER_NAMES
         },
     }
+
+
+def follow_provider(db, provider):
+    """The model chosen under Connections is the one that runs. Any save under Advanced writes both roles here, and from then on
+    "Use this one" only changed a setting nothing read, while its card said In use."""
+    value = db.get_setting("agent_settings", {}) or {}
+    if value.get("models") and provider in PROVIDER_NAMES:
+        db.set_setting("agent_settings", {**value, "models": {"answers": provider, "navigator": provider}})
 
 
 def save(db, config, value):

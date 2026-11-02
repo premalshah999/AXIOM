@@ -180,7 +180,8 @@ def parse_check(pdf: bytes, doc) -> dict:
         item("Phone in the first lines", PHONE.search(head))
     lines = {squash(line) for line in text.splitlines()}
     for s in doc.sections:
-        if s.include and (s.entries or s.text.strip()):
+        # A section whose every entry was taken off isn't printed, so it has no heading to find.
+        if s.include and (any(e.include for e in s.entries) or s.text.strip()):
             item(f'"{s.title}" reads as its own heading', squash(s.title) in lines)
     # Each bullet is looked for after the one before it. From the start of the text, two bullets that open the same way both land on the first.
     at, missing, in_order = 0, 0, True

@@ -1,11 +1,11 @@
 import { FileText, Video } from "lucide-react";
-import { useId, useState } from "react";
+import { useId, useMemo, useState, type KeyboardEvent as ReactKey } from "react";
 import { api } from "./api";
 import { useWorkspace } from "./context";
 import { useAction, useDraft } from "./hooks";
 import type { Job, Review } from "./types";
 import { ago, employerOf, linkHost, plural } from "./format";
-import { Button, ConfirmButton, Dropzone, Listbox } from "./ui/index";
+import { Button, ConfirmButton, Dropzone } from "./ui/index";
 import { RowMenu } from "./worktools";
 import { takeOverJob, TakeOverButton } from "./steer";
 import "./styles/work.css";
@@ -43,11 +43,16 @@ export function groupQuestions(
 ): QuestionGroup[] {
   const groups = new Map<string, QuestionGroup>();
   for (const review of reviews) {
+    const job = jobFor(review.run_id);
+    // The choices in any order are the same choices (owner_questions.same_question), and an answer that belongs to one employer stays with it.
     const key =
       review.key in { manual: 1, session: 1 } || isBlind(review)
         ? review.id
-        : [norm(review.display_question || review.question), JSON.stringify(review.options)].join("\u0000");
-    const job = jobFor(review.run_id);
+        : [
+            norm(review.display_question || review.question),
+            JSON.stringify(review.options.map(norm).sort()),
+            review.employer_only ? (job?.company || review.run_id).toLowerCase() : "",
+          ].join("\u0000");
     const group = groups.get(key);
     if (group) {
       group.reviews.push(review);
@@ -148,6 +153,8 @@ function fromInput(value: string, format?: string) {
 // into words instead: nobody should read "application/vnd.oasis.opendocument.text".
 function plainRequirement(requirement = "") {
   const first = requirement.split(" · ")[0]!.trim();
+  // The form's list is empty until something is typed, so nobody could read its choices: say what the box wants.
+  if (/^Search box/.test(first)) return "The form searches as you type, so nothing can be listed here. Type your answer as the form would show it.";
   const limit = /at most (\d+) characters/.exec(first)?.[1];
   if (limit) return `At most ${limit} characters`;
   if (/^Paragraph/.test(first)) return "A few sentences";
@@ -167,6 +174,52 @@ function fileWords(accept = "") {
     /\.zip/.test(rules) && "a zip",
   ].filter(Boolean);
   return words.length ? words.join(", ").replace(/, ([^,]*)$/, " or $1") + "." : "PDF, Word, text or an image.";
+}
+
+/**
+ * Every choice the form offers, on the screen and in its whole wording: a list too long for buttons, with a box that narrows it. A
+ * browser's suggestion list showed nothing until something was typed, and a menu hid its choices behind a click. Where the form also takes
+ * typed text (`typed`), the box is the answer itself.
+ */
+function ChoiceList({ options, value, onChange, typed, partial, label }: { options: string[]; value: string; onChange: (value: string) => void; typed?: boolean; partial?: boolean; label: string }) {
+  const [filter, setFilter] = useState("");
+  const uid = useId();
+  const words = norm(typed ? value : filter);
+  const shown = useMemo(() => (words ? options.filter((o) => norm(o).includes(words)) : options), [options, words]);
+  const keys = (e: ReactKey<HTMLInputElement>) => {
+    // Enter picks the only match, then the next Enter sends.
+    if (e.key === "Enter" && !typed && shown.length === 1 && value !== shown[0]) {
+      e.preventDefault();
+      onChange(shown[0]!);
+    }
+  };
+  return (
+    <div className="nd-choices">
+      <input
+        data-answer
+        className="ax-control"
+        aria-label={typed ? label : `Narrow the ${options.length} choices`}
+        value={typed ? value : filter}
+        onChange={(e) => (typed ? onChange(e.target.value) : setFilter(e.target.value))}
+        onKeyDown={keys}
+        placeholder={typed ? "Choose below or type your answer" : `Narrow ${options.length} choices`}
+      />
+      <div className="nd-choice-list" role="radiogroup" aria-label={label} tabIndex={-1}>
+        {shown.map((x) => (
+          <label key={x} className="ax-check">
+            <input type="radio" name={uid} value={x} checked={value === x} onChange={() => onChange(x)} />
+            <span>{x}</span>
+          </label>
+        ))}
+        {!shown.length && <p className="ax-note">{typed ? "Not one of the choices listed. It goes to the form as you typed it." : "No choice has those words."}</p>}
+      </div>
+      <p className="ax-hint">
+        {!!words && shown.length !== options.length ? `${shown.length} of ${options.length} choices.` : `${options.length} choices.`}
+        {!typed && !!value && !shown.includes(value) && ` You picked: ${value}.`}
+        {partial && " The form may have more than these, so you can type yours."}
+      </p>
+    </div>
+  );
 }
 
 /**
@@ -214,9 +267,8 @@ export function QuestionCard({
   const kind = block?.hard ? q.input_kind || (q.options.length ? "choice" : "text") : q.kind || (q.options.length ? "choice" : "text");
   const uid = useId();
   const id = "q-" + q.id;
-  const listId = "q-options-" + q.id;
-  const searched = kind === "choice" && !q.multiple && !q.allow_other && q.options.length > 12;
-  const ready = kind === "upload" ? !!file : searched ? q.options.includes(answer) : !!answer.trim();
+  const listed = kind === "choice" && !q.multiple && !q.allow_other;
+  const ready = kind === "upload" ? !!file : listed ? q.options.includes(answer) : !!answer.trim();
   const whole = q.display_question || q.question;
   const { place, text } = questionParts(review);
   const shape = shapeOf(q.requirement);
@@ -263,7 +315,7 @@ export function QuestionCard({
   const notApplicable =
     note || compact
       ? undefined
-      : kind === "text" && !shape.placeholder && (shape.input === "text" || shape.input === "paragraph") && (shape.max ?? 8) >= 3
+      : kind === "text" && !q.context?.search_only && !shape.placeholder && (shape.input === "text" || shape.input === "paragraph") && (shape.max ?? 8) >= 3
         ? "N/A"
         : kind === "choice"
           ? q.options.find((o) => /^(n\/?a|not applicable|does not apply)\b/i.test(o.trim()))
@@ -293,7 +345,7 @@ export function QuestionCard({
     kind === "upload" ? (
       <Dropzone label="File to attach" accept={q.accept || ".pdf,.doc,.docx,.txt,.rtf,.odt,.png,.jpg,.jpeg"} file={file} onFile={chooseFile} hint={fileWords(q.accept)} />
     ) : kind === "choice" && q.multiple ? (
-      <fieldset className="nq-opts" aria-label="Your answers">
+      <fieldset className={"nq-opts" + (q.options.length > 8 ? " nd-choice-list" : "")} aria-label="Your answers">
         {q.options.map((x, i) => {
           const picked = answer.split("\n").filter(Boolean);
           return (
@@ -310,19 +362,18 @@ export function QuestionCard({
         })}
       </fieldset>
     ) : kind === "choice" && q.allow_other ? (
-      <>
-        <input
-          data-answer
-          className="ax-control"
-          aria-label={label}
-          list={offered ? undefined : listId}
-          required
-          maxLength={8000}
-          value={answer}
-          onChange={(e) => setAnswer(e.target.value)}
-          placeholder="Choose or type your answer"
-        />
-        {offered ? (
+      offered ? (
+        <>
+          <input
+            data-answer
+            className="ax-control"
+            aria-label={label}
+            required
+            maxLength={8000}
+            value={answer}
+            onChange={(e) => setAnswer(e.target.value)}
+            placeholder="Choose or type your answer"
+          />
           <div className="nd-offers">
             {q.options.map((x) => (
               <Button key={x} size="sm" variant="ghost" aria-pressed={answer === x} onClick={() => setAnswer(x)}>
@@ -330,14 +381,11 @@ export function QuestionCard({
               </Button>
             ))}
           </div>
-        ) : (
-          <datalist id={listId}>
-            {q.options.map((x) => (
-              <option key={x} value={x} />
-            ))}
-          </datalist>
-        )}
-      </>
+          {q.context?.options_partial && <p className="ax-hint">The form may have more than these, so you can type yours.</p>}
+        </>
+      ) : (
+        <ChoiceList options={q.options} value={answer} onChange={setAnswer} typed partial={q.context?.options_partial} label={label} />
+      )
     ) : buttons ? (
       <div className={"nq-opts" + (q.options.every((o) => o.length <= 18) ? " is-short" : "")} role="radiogroup" aria-label={label}>
         {q.options.map((x, i) => (
@@ -354,37 +402,8 @@ export function QuestionCard({
           </label>
         ))}
       </div>
-    ) : kind === "choice" && q.options.length > 12 ? (
-      <>
-        {/* A long list is searched, not scrolled: type a few letters and pick from what the form offers. */}
-        <input
-          data-answer
-          className="ax-control"
-          aria-label={label}
-          list={listId}
-          required
-          value={answer}
-          onChange={(e) => setAnswer(e.target.value)}
-          placeholder={`Search ${q.options.length} choices`}
-        />
-        <datalist id={listId}>
-          {q.options.map((x) => (
-            <option key={x} value={x} />
-          ))}
-        </datalist>
-        {!!answer && !q.options.includes(answer) && <p className="ax-hint">Pick one of the choices the form offers.</p>}
-      </>
     ) : kind === "choice" ? (
-      <Listbox
-        label={label}
-        value={answer}
-        options={[{ value: "", label: "Choose an answer" }, ...q.options.map((x) => ({ value: x, label: x }))]}
-        onChange={(value) => {
-          setAnswer(value);
-          // The menu hands focus back to itself, where Enter would only reopen it. Enter should send.
-          if (value) focusSend();
-        }}
-      />
+      <ChoiceList options={q.options} value={answer} onChange={setAnswer} label={label} />
     ) : shape.input === "date" || shape.input === "month" ? (
       <input
         data-answer
@@ -472,6 +491,8 @@ export function QuestionCard({
   );
   const hideControl = !!block?.hard && !answering;
   const hint = plainRequirement(q.requirement);
+  // What the form prints with the question, and the boxes beside a tick box: part of what it is asking.
+  const printed = [q.context?.hint, q.context?.peers && `Other boxes here: ${q.context.peers.replaceAll(" | ", ", ")}.`].filter(Boolean).join(" ");
 
   if (compact)
     return (
@@ -488,6 +509,7 @@ export function QuestionCard({
           <p className={"nq-q" + (whole.length > 140 ? " is-long" : "")} id={id}>
             {whole}
           </p>
+          {printed && <p className="ax-note">{printed}</p>}
           {(hint || others.length > 0) && (
             <p className="ax-note">
               {hint}
@@ -564,6 +586,12 @@ export function QuestionCard({
           </>
         ) : (
           <p className="nd-meta">
+            {printed && (
+              <>
+                {printed}
+                <br />
+              </>
+            )}
             {!block && q.why && `${q.why} `}
             {q.created_at && `Asked ${ago(q.created_at)}. `}
             <button type="button" className="ax-link" aria-expanded={showPage} onClick={() => setShowPage(!showPage)}>

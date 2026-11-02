@@ -146,6 +146,14 @@ EMPLOYER_SENDER_FAMILIES = {
 }
 
 
+# Anyone can send from these and pass DMARC, so a sender here says nothing about whose mail it is.
+PUBLIC_MAIL_DOMAINS = frozenset({
+    "gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com", "msn.com", "yahoo.com", "ymail.com", "icloud.com",
+    "me.com", "mac.com", "aol.com", "proton.me", "protonmail.com", "pm.me", "gmx.com", "gmx.net", "mail.com", "zoho.com",
+    "fastmail.com", "yandex.com", "hey.com",
+})
+
+
 def sf_tenant_names(tenant):
     """Names in a SuccessFactors company id (the company= the career pages carry): "Hersheys" -> hersheys,
     "WestinghouseP" -> westinghousep, westinghouse. A trailing environment marker (P, P2, PRD) is SAP's, not the

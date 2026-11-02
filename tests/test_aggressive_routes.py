@@ -4,14 +4,14 @@ import asyncio
 
 from jobpilot.features.resumes.aggressive import store
 from jobpilot.features.resumes.aggressive.schema import Brief
-from test_aggressive_pipeline import JOB, PROFILE, context, needs_tex, proposals
+from test_aggressive_pipeline import JOB, ORIGINALS, PROFILE, context, needs_tex, proposals
 
 
 def setup_workspace(app, service, tmp_path):
     # Use the production factory's mount, including its security middleware.
     source, ctx = context(tmp_path, db=service.db)
     brief = asyncio.run(ctx.model(Brief, "", "{}"))
-    return store.create(service.db, JOB, source, PROFILE, proposals(), brief)
+    return store.create(service.db, JOB, source, PROFILE, proposals(), brief, replaces=list(ORIGINALS))
 
 
 @needs_tex
@@ -26,6 +26,7 @@ def test_preview_contains_drafts_then_switches_to_originals(client, app, service
     assert preview.headers["x-project-approval-required"] == "true"
     text = "\n".join(p.extract_text() for p in PdfReader(io.BytesIO(preview.content)).pages)
     assert all(p.title in text for p in proposals())
+    assert all(heading not in text for heading, _ in ORIGINALS.values())
     chosen = client.put(
         root + "/choices", json={"revision": 0, "selected_drafts": [], "removed_projects": []}
     )
@@ -34,7 +35,7 @@ def test_preview_contains_drafts_then_switches_to_originals(client, app, service
     assert original.status_code == 200, original.text
     assert original.headers["x-project-approval-required"] == "false"
     text = "\n".join(p.extract_text() for p in PdfReader(io.BytesIO(original.content)).pages)
-    assert "Public Report Review" in text
+    assert all(heading in text for heading, _ in ORIGINALS.values())
     assert all(p.title not in text for p in proposals())
     stale = client.put(root + "/choices", json={"revision": 0})
     assert stale.status_code == 409

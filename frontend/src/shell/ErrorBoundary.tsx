@@ -31,12 +31,6 @@ export class PageBoundary extends Component<{ children: ReactNode }, { error: Er
           </Button>
           <Button onClick={() => location.reload()}>Reload AXIOM</Button>
         </div>
-        {error.message && (
-          <details className="ax-fold">
-            <summary>Details</summary>
-            <pre>{error.message}</pre>
-          </details>
-        )}
       </div>
     );
   }

@@ -3,7 +3,7 @@
 import { useState, type ReactNode } from "react";
 import { api } from "./api";
 import { useWorkspace } from "./context";
-import { useAction, useDraft, usePoll } from "./hooks";
+import { useAction, usePoll } from "./hooks";
 import { ConnectionFields, ConnectionsGate, FieldInput, useConnections } from "./connections";
 import { AutoApplySettings } from "./discovery";
 import { ago, plural } from "./format";
@@ -81,6 +81,7 @@ function Limits() {
   const c = useConnections();
   const limits = usePoll<Limits>((signal) => api("/limits", "GET", undefined, signal), 60000);
   const [draft, setDraft] = useState<Limits | null>(null);
+  const [aiFold, setAiFold] = useState(false);
   const { pending, run } = useAction();
   const stats = snapshot.stats || ({} as Snapshot["stats"]);
   const value = draft || limits.data;
@@ -125,7 +126,7 @@ function Limits() {
                     c={c}
                     name="daily_application_limit"
                     label="Applications per day"
-                    hint={`${stats.submissions_reserved ?? 0} used today. AXIOM stops starting new ones at this number.`}
+                    hint={`${plural(stats.submissions_reserved ?? 0, "application")} sent today (Overview counts only the ones an employer confirmed). AXIOM stops starting new ones at this number.`}
                   />
                   <FieldInput
                     c={c}
@@ -148,7 +149,8 @@ function Limits() {
               )}
               {value && (
                 // The engine's own dials: out of the way of someone setting a daily limit.
-                <details className="ax-fold" open={!!tokenError}>
+                // Opens for a refused number and stays open once it is fixed: it used to shut in the person's face, mid-edit.
+                <details className="ax-fold" open={aiFold || !!tokenError} onToggle={(e) => setAiFold(e.currentTarget.open)}>
                   <summary>How much AI one application may use</summary>
                   <div className="st-fields">
                     <Input
@@ -203,6 +205,7 @@ function automation(rt: AutopilotRuntime, paused: boolean, sched: SchedulerHealt
 
 function modelState(model: NonNullable<RuntimeHealth["models"]>["answers"]) {
   if (!model) return "";
+  if (model.has_key === false) return "no key saved. Add one under Connections";
   return model.state === "ready"
     ? "ready"
     : model.state === "recovery_ready"
@@ -332,7 +335,8 @@ const AGENT_PROVIDERS: { value: AgentModelProvider; label: string }[] = [
 function AgentControls() {
   const { refresh } = useWorkspace();
   const settings = usePoll<AgentSettings>((signal) => api("/agents", "GET", undefined, signal), 30000);
-  const [draft, setDraft, clearDraft] = useDraft<AgentSettingsUpdate | null>("agent-settings", null);
+  const [draft, setDraft] = useState<AgentSettingsUpdate | null>(null);
+  const clearDraft = () => setDraft(null);
   const { pending, run } = useAction();
   const saved = settings.data;
   // A thin or partial answer is treated as not loaded rather than crashing the page.
@@ -345,7 +349,12 @@ function AgentControls() {
     (AGENT_HELPERS.some(({ key }) => draft.enabled[key] !== saved!.enabled[key]) ||
       draft.models.answers !== saved!.models.answers ||
       draft.models.navigator !== saved!.models.navigator);
-  const unavailable = !!current && usable && (!available("answers") || !available("navigator"));
+  // Only a newly chosen model needs its key: turning a helper on or off works before any key is saved.
+  const unavailable =
+    !!current &&
+    usable &&
+    ((current.models.answers !== saved!.models.answers && !available("answers")) ||
+      (current.models.navigator !== saved!.models.navigator && !available("navigator")));
   const save = () => {
     if (!current || !changed || unavailable || pending) return;
     run(
@@ -459,6 +468,9 @@ export function AdvancedSettings() {
         </Panel>
       </section>
       <AgentControls />
+      <Panel title="Company logos">
+        <ConnectionFields names={["company_logos"]} />
+      </Panel>
       <Platforms />
     </>
   );
