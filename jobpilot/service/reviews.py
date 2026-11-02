@@ -269,7 +269,12 @@ class ReviewsMixin:
                     # page answers one job's question and Needs you sees only the first 100, so the server clears every other job
                     # asking. A tick box, a caption under its question and a list reused nowhere else (reusable_answer) stayed asked.
                     this = oq.same_question(review.question, review.options, context)
-                    tied = oq.employer_only(review.question, review.options) or mentions_employer(review.question, job.company or "")
+                    # What the answer says ties it too: one naming this employer never goes to the next employer's open question.
+                    tied = (
+                        oq.employer_only(review.question, review.options)
+                        or mentions_employer(review.question, job.company or "")
+                        or mentions_employer(answer, job.company or "")
+                    )
                     # Columns only for the run and the job: a whole run row decodes its packet (~320 KB), here for every open question.
                     for other, owner_id, company in s.execute(
                         select(Review, Run.id, Job.company)
