@@ -589,6 +589,28 @@ paylocity_address = Scenario(
     profile={"address": {"line1": "1 Example Way", "city": "Exampleton", "state": "MD", "postal_code": "20000", "country": "United States of America"}, "location": "Exampleton, MD"},
 )
 
+# ---- an optional account section inside the application ------------------------------------------------------------------
+
+_INLINE_ACCOUNT = """<hr><h2>Create a Career Profile account (optional)</h2>
+<p>With an account, you can track your applications. The system will create your account after you submit your application.</p>
+<div role="radiogroup" aria-label="Select an option"><div role="radio" aria-checked="true" tabindex="0">Use a password</div>
+<div role="radio" aria-checked="false" tabindex="-1">Use a one-time code</div>
+<div role="radio" aria-checked="false" tabindex="-1">Already have an account</div></div>
+<label for="pw">Password</label><input id="pw" name="password" type="password" autocomplete="off">
+<label for="pw2">Confirm password</label><input id="pw2" name="password2" type="password" autocomplete="off">"""
+_SITE_CHROME = """<nav><a href="/login">Log in</a> <button type="button" onclick="fetch('/signup-dialog',{method:'POST'})">Sign up</button></nav>"""
+
+inline_account = Scenario(
+    "an_optional_account_section_is_part_of_the_form",
+    "One long application with an optional \"Create a Career Profile account\" section (two password boxes, \"Already have an account\" as a choice) read as a "
+    "sign-up page: the engine pressed the site's own Sign up and Log in, typed a password into a login nobody had, and sent nothing (Meta 2026-11-01).",
+    {**simple_apply, "/apply/1": page("Apply", _SITE_CHROME + "<h1>Apply: Software Engineer</h1>" + form(
+        NAME_FIELDS, EMAIL_FIELD, RESUME_FIELD, _INLINE_ACCOUNT, SUBMIT_BUTTON)),
+     "/login": page("Log in", "<h1>Log in</h1>"), "/signup-dialog": "{}"},
+    never=("/login", "/signup-dialog"),
+    expect={"first_name": "Alex", "last_name": "Example", "email": "alex@example.test", "password": ""},
+)
+
 SCENARIOS = [
     plain,
     search_box,
@@ -618,4 +640,5 @@ SCENARIOS = [
     long_question_with_password,
     work_upload,
     paylocity_address,
+    inline_account,
 ]
