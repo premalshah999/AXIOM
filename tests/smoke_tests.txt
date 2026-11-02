@@ -1,46 +1,130 @@
-# The browser tests the release gate runs every time (`scripts/dev/gate.sh smoke`); the full browser run (`gate.sh browser`)
-# is for changes to the engine and runs less often. One entry per line: `file.py` is the whole file, `file.py::text` the tests
-# whose name contains the text. Nothing here is removed from the full run, and a guard is never dropped to make this fast.
+# What `scripts/dev/gate.sh smoke` runs, with a browser or without one: one command that asks whether a change broke a guard or a
+# whole flow. `gate.sh release` runs the browser tests named here after its fast and gallery tiers, which have already run the rest.
+# The full browser run (`gate.sh browser`) is for changes to the engine and runs less often.
 #
-# What belongs here: every test that guards a duplicate or uncertain send, consent, mail or the truthfulness of an answer, and
-# one or two tests per platform family and per kind of widget, so that a change to the engine that breaks a whole family shows.
-# Keep it under about five minutes on an idle machine: `gate.sh smoke` prints its slowest tests; move a slow file out and name a
-# faster one for the same guard rather than letting the gate grow.
+# One entry per line: `file.py` is the whole file, `file.py::text` the tests whose name contains the text. Nothing here is removed
+# from the fast, gallery or full runs, and a guard is never dropped to make this fast. An entry that names no test is printed at the
+# end of the run: a renamed guard must not leave quietly.
+#
+# What belongs here: every test that guards a duplicate or uncertain send, a wrong job, consent, a mail mix-up, a false confirmation
+# or the truthfulness of an answer; the mail, gallery and Aggressive flows; and one or two tests per platform family and per kind of
+# widget, so that a change to the engine that breaks a whole family shows. `gate.sh smoke` prints its slowest tests: move a slow
+# file out and name a faster one for the same guard rather than letting the gate grow.
 
-# A commit that may have been sent is never sent again; a refused one is read as refused.
+# A commit that may have been sent is never sent again; a refused one is read as refused; a click that isn't a commit isn't one.
 test_commit_click_undelivered.py
+test_commit_sent_nothing.py
 test_post_commit_rejection.py
 test_workday_submitted_state.py
 test_submission_control_mutation.py
 test_employer_application_cap.py
+test_project_scoped_employer_cap.py
+test_unknown_resubmit.py
+test_unknown_autoresubmit.py
+test_unknown_receipt_first.py
+test_reconcile_committed.py
+test_validation_resubmit.py
+test_standalone_duplicate_notice.py
+test_navigator_submit_reroute.py
+test_page_advances_itself.py
+
+# Take over: what the person handed back stays theirs, and a tab they sent is sent once.
+test_take_over.py
+test_owner_handback_snapshot.py
+
+# Wrong job: one posting has one identity, and a run stays on its job's own posting. (test_posting_match.py, test_wrong_posting_browser.py
+# and the gallery's other-posting scenarios come with agent13/wrongjob: until it merges these print as naming no test.)
+test_requisition_identity.py
+test_shortlink_identity.py
+test_shared_host_employer_identity.py
+test_workday_posting_applied.py
+test_posting_match.py
+test_wrong_posting_browser.py
+test_gallery.py::career_home_instead_of_posting
+test_gallery.py::posting_with_similar_jobs_beside_apply
+test_gallery.py::form_heading_names_another_role
+test_gallery.py::form_structured_data_names_another_role
+test_gallery.py::receipt_names_another_role
+test_gallery.py::receipt_address_carries_another_number
+
+# False confirmations: only an employer's real receipt for this job counts.
+test_confirmation_pages.py
+test_dayforce_confirmation_page.py
+test_greenhouse_confirmation_route.py
+test_sf_confirmation_titled.py
+test_receipt_names_role.py
+test_receipt_names_role_on_custom_site.py
+test_receipt_ignores_site_search.py
+test_receipt_attribution.py
+test_icims_receipt.py
+test_success_existing_application.py
 
 # Consent and agreements are ticked only where the person allowed it.
+test_consent_dialog.py
 test_consent_dialog_submit.py
+test_required_contact_consent.py
+test_data_consent_not_demographic.py
+test_auth_agreement_box.py
 test_orphan_agreement_checkbox.py
 test_microsoft_consent_modal.py
 test_dayforce_clickwrap.py
 test_icims_privacy_acknowledge.py
 test_sf_privacy_notice.py
 
-# Mail: a code, link or reset reaches only its own application.
+# Mail: a code, link or reset reaches only its own application, from an empty database, through a real run.
 test_mail_browser.py
 test_mail_fake_imap_e2e.py
+test_mail_prearm_attribution.py
+test_mail_sender_gates.py
+test_mail_rule_follows_posting.py
+test_icims_mail_attribution.py
+test_email_browser_rebinds_on_handoff.py
+test_shared_sender_starts.py
+test_late_reset_mail.py
+test_reset_code_mail.py
+test_durable_mail_window.py
 test_embedded_greenhouse_code.py
+test_mail_fresh_install.py
 test_mail_fresh_run.py::test_a_new_install_receives_and_uses_the_mail[custom-code]
 test_mail_fresh_run.py::test_a_new_install_receives_and_uses_the_mail[custom-link]
 test_mail_fresh_run.py::test_a_new_install_receives_and_uses_the_mail[custom-reset]
+test_mail_fresh_run.py::test_two_employers_on_one_shared_sender
+
+# The gallery: a real trap through the real engine to what the employer's site recorded. All of it runs in `gate.sh gallery`; here, one
+# plain run and the scenarios that guard a send, an account, an answer or a closed job.
+test_gallery.py::plain_form
+test_gallery.py::test_a_dry_run_reaches_the_final_step
+test_gallery.py::hidden_duplicate_controls
+test_gallery.py::server_refuses_then_accepts
+test_gallery.py::submit_with_no_confirmation
+test_gallery.py::closed_posting
+test_gallery.py::required_agreements_in_long_legal_text
+test_gallery.py::a_saved_not_answered_is_not_typed
+test_gallery.py::a_survey_that_asks_for_an_ssn_closes_the_job
+test_gallery.py::a_personality_test_is_left_to_the_person
+test_gallery.py::an_optional_account_section_is_part_of_the_form
+
+# An optional account section inside an application is the form; a sign-up page that offers only a provider ends plainly.
+test_inline_account_section.py
+test_social_login_only.py
+
+# Aggressive tailoring: the warning, the approval gate, the draft label and the exact file that is uploaded.
+test_aggressive_browser.py
+test_aggressive_pipeline.py
+test_aggressive_integration.py
+test_aggressive_routes.py
 
 # Answers: policy-bound questions are answered from the person's facts or left to them.
 test_major_policy.py
 test_salary_midpoint.py
 test_stated_char_limit.py
+test_foreign_fallback.py
 
 # The engine's readiness, click and confirmation paths, and one or two files per platform family.
 test_form_readiness.py
 test_settle_roundtrips.py
 test_locator_single_roundtrip.py
 test_submit_controls.py
-test_confirmation_pages.py
 test_tick_boxes.py
 test_prompt_catalog.py::test_consent_
 test_prompt_catalog.py::test_privacy_dialog
@@ -49,7 +133,6 @@ test_prompt_catalog.py::test_model_cannot_commit_unoffered
 test_prompt_catalog.py::test_react_select_multi
 test_oracle_commit.py
 test_dayforce_submit_step.py
-test_dayforce_confirmation_page.py
 test_eightfold_search_box.py
 test_smartrecruiters_refusals.py
 test_taleo_error_named_fields.py

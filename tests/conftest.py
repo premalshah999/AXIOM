@@ -247,8 +247,8 @@ def uses_session_loop(item):
 
 
 def smoke_entries():
-    """tests/smoke_tests.txt: the browser tests the release gate runs every time (`gate.sh smoke`). One entry per line,
-    `file.py` for a whole file or `file.py::text` for the tests whose name contains the text; `#` starts a comment."""
+    """tests/smoke_tests.txt: what `gate.sh smoke` runs, browser or not. One entry per line, `file.py` for a whole file or
+    `file.py::text` for the tests whose name contains the text; `#` starts a comment."""
     entries = []
     path = Path(__file__).with_name("smoke_tests.txt")
     for line in path.read_text().splitlines() if path.exists() else []:
@@ -259,8 +259,9 @@ def smoke_entries():
     return entries
 
 
-def pytest_collection_modifyitems(items):
+def pytest_collection_modifyitems(config, items):
     smoke = smoke_entries()
+    unnamed = set(smoke)
     for item in items:
         names = set(item.fixturenames)
         browser = bool(names & BROWSER_FIXTURES) or item.get_closest_marker("browser") is not None
@@ -268,8 +269,10 @@ def pytest_collection_modifyitems(items):
         docs = " ".join(filter(None, [getattr(item.module, "__doc__", ""), getattr(item.function, "__doc__", "")]))
         if browser:
             item.add_marker(pytest.mark.browser)
-            if any(item.path.name == file and text in item.name for file, text in smoke):
-                item.add_marker(pytest.mark.smoke)
+        listed = {(file, text) for file, text in smoke if item.path.name == file and text in item.name}
+        if listed:
+            item.add_marker(pytest.mark.smoke)
+            unnamed -= listed
         if integration:
             item.add_marker(pytest.mark.integration)
         if not (browser or integration):
@@ -278,6 +281,14 @@ def pytest_collection_modifyitems(items):
             item.add_marker(pytest.mark.regression)
         if asyncio.iscoroutinefunction(item.function) and uses_session_loop(item):
             item.add_marker(pytest.mark.asyncio(loop_scope="session"), append=False)
+    if "smoke" in (config.getoption("markexpr") or "") and not config.option.file_or_dir:
+        config.smoke_unnamed = sorted(unnamed)
+
+
+def pytest_terminal_summary(terminalreporter, config):
+    """A guard renamed or moved would otherwise leave the smoke list without a word."""
+    for file, text in getattr(config, "smoke_unnamed", []):
+        terminalreporter.write_line(f"tests/smoke_tests.txt names no test: {file}{'::' + text if text else ''}", yellow=True)
 
 
 @pytest.fixture(autouse=True)
