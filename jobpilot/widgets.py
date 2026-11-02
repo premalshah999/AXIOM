@@ -1317,6 +1317,38 @@ async def dispatch_owned_click(handle, *, pointer_sequence=False):
                 }""", pointer_sequence)
 
 
+# The element on top of a control's click point is a page-loading sheet: a loader role, an aria-busy region, a spinner or
+# loader class, or a sheet that holds a "loading" image. A dialog, popup or menu is not one: those are closed by clear_cover.
+BUSY_COVER_JS = r"""e => {
+  const r = e.getBoundingClientRect();
+  if (!r.width || !r.height) return false;
+  const hit = e.ownerDocument.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+  if (!hit || hit === e || e.contains(hit)) return false;
+  const named = n => [typeof n.className === 'string' ? n.className : '', n.id || '', n.getAttribute('aria-label') || ''].join(' ');
+  for (let n = hit, depth = 0; n && n !== e.ownerDocument.body && depth < 6; n = n.parentElement, depth++) {
+    if (n.matches('[role=dialog],[aria-modal=true],[role=listbox],[role=menu]')) return false;
+    if (n.getAttribute('aria-busy') === 'true' || /(?:^|[\s_-])(?:loader|loading|spinner|overlaybg|busy)(?:$|[\s_-])/i.test(named(n))) return true;
+    const kids = n.querySelectorAll('img[alt*=loading i],[role=progressbar],[role=alert][aria-label*=loading i],.spinner,.loader');
+    if (kids.length && n.getBoundingClientRect().height >= innerHeight * 0.5) return true;
+  }
+  return false;
+}"""
+
+
+async def wait_busy_cover(handle, budget=15.0):
+    """True once a loading sheet that covered this control has gone; False when none covered it or it never left."""
+    try:
+        if not await handle.evaluate(BUSY_COVER_JS):
+            return False
+        frame = await handle.owner_frame()
+        if frame is None:
+            return False
+        await frame.wait_for_function(f"e => !({BUSY_COVER_JS})(e)", arg=handle, timeout=int(budget * 1000), polling=100)
+        return True
+    except Exception:
+        return False
+
+
 async def safe_click(el, timeout=4000, *, field_control=False, _reresolved=0):
     # Keep an exact node handle through React replacement and type restoration.
     await ensure_uncovered(el)
@@ -1378,7 +1410,12 @@ async def safe_click(el, timeout=4000, *, field_control=False, _reresolved=0):
                 # enabled state and that no other element covers its click point.
                 clicked = await dispatch_owned_click(handle)
                 if not clicked:
-                    raise
+                    # A loading overlay over the page (Humana's Phenom form after the resume parse, 2026-11-01: a grey
+                    # sheet with a spinner and role=alert "loading") refuses every click until the page finishes.
+                    # Wait for it to go, then click once more with the real pointer.
+                    if not await wait_busy_cover(handle):
+                        raise
+                    await handle.click(timeout=timeout)
     except Exception as exc:
         # The click can navigate while Playwright is waiting for it to finish,
         # destroying this handle's context before the timeout fallback reads it.
