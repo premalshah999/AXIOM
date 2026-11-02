@@ -49,14 +49,16 @@ closed on the employers' sites). Copies the friend saved elsewhere by hand, and 
 
 ## Publishing an update
 
-The app asks GitHub once a day for the newest release (`https://api.github.com/repos/premalshah999/AXIOM/releases/latest`). Publish the
+The app asks GitHub once a day for the newest release (`https://api.github.com/repos/premalshah999/AXIOM/releases/latest`), and says
+nothing unless there is one: a private repository and one with nothing published both answer 404. Help, Check for Updates then says
+"No update to offer", because nothing there can make this copy the newest. Publish the
 disk image as a release named for the version (`v1.1.0`); the number must be larger than `version` in `pyproject.toml` at build time. A
-friend then sees "AXIOM 1.1.0 is available" with a button that opens the release page, and Help, Check for Updates does the same on
-request. The app never downloads or replaces itself: the friend drags the new version over the old one, and their data stays.
+friend then sees "AXIOM 1.1.0 is available" with a button that opens the release page, once for each version, and Help, Check for
+Updates does the same on request. The app never downloads or replaces itself: the friend drags the new version over the old one, and their data stays.
 
 ## When a copy is incomplete
 
 `desktop/build.sh` writes `Resources/install-manifest.txt` (every file and its size). At each start the window checks it, and a copy
-that stopped part way shows "AXIOM was not copied completely" with what to do, instead of a Python error. A drag in Finder is the
+that stopped part way, the manifest itself included, shows "AXIOM was not copied completely" with what to do, instead of a Python error. A drag in Finder is the
 supported way to install; the 2026-11-01 failure came from a script in a terminal, which macOS may treat as a program modifying an app
 (App Management). That cause is not proven.

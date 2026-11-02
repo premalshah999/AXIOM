@@ -39,7 +39,8 @@ IF SOMETHING GOES WRONG
   copied completely: drag AXIOM to the Bin, then drag it from this
   window to Applications again. Use Finder, not Terminal.
 
-- On macOS 14 or older: right-click AXIOM, choose Open, then Open.
+- On macOS 14 or older AXIOM will not open: update your Mac first
+  (Apple menu, System Settings, General, Software Update).
 
 - Stuck? In AXIOM, choose Help, then Copy Diagnostics, and paste
   the result into a message to whoever gave you AXIOM. It has no
@@ -47,5 +48,6 @@ IF SOMETHING GOES WRONG
 
 TO REMOVE AXIOM
 
-Quit it, drag it from Applications to the Bin, and follow Settings,
-Your account, Delete my data first if you want your data gone too.
+If you want your data gone too, first open AXIOM and choose Settings,
+Your account, Delete everything. Then quit AXIOM and drag it from
+Applications to the Bin.

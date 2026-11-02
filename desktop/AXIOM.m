@@ -39,10 +39,24 @@ static void Log(NSString *line) {
   if (![NSFileManager.defaultManager fileExistsAtPath:path])
     [NSFileManager.defaultManager createFileAtPath:path contents:nil attributes:@{NSFilePosixPermissions : @0600}];
   NSFileHandle *file = [NSFileHandle fileHandleForWritingAtPath:path];
-  [file seekToEndOfFile];
+  // The forms that return an error. The older ones raise when the disk is full and nothing catches that: the window would die on
+  // its first line of log, on the one day it has something to explain.
+  [file seekToEndReturningOffset:nil error:nil];
   [file writeData:[[[[stamp stringFromDate:NSDate.date] stringByAppendingString:line] stringByAppendingString:@"\n"]
-                      dataUsingEncoding:NSUTF8StringEncoding]];
-  [file closeFile];
+                      dataUsingEncoding:NSUTF8StringEncoding]
+            error:nil];
+  [file closeAndReturnError:nil];
+}
+
+// The same line as supervisor.DISK_FULL_BYTES. Under it the supervisor may not have been able to write why it stopped, so the window looks.
+static BOOL DiskFull(void) {
+  NSNumber *free = [NSFileManager.defaultManager attributesOfFileSystemForPath:Home() error:nil][NSFileSystemFreeSize];
+  return free && free.longLongValue < 200LL * 1024 * 1024;
+}
+
+// A test instance beside someone working must not take the keyboard.
+static void Activate(void) {
+  if (!getenv("AXIOM_SHELL_BACKGROUND")) [NSApp activateIgnoringOtherApps:YES];
 }
 
 static NSDictionary *ReadJSON(NSString *path) {
@@ -211,6 +225,9 @@ static NSString *const SignedOutScript =
   self.timer = [NSTimer timerWithTimeInterval:1.0 target:self selector:@selector(tick) userInfo:nil repeats:YES];
   self.timer.tolerance = 0.4;
   [NSRunLoop.mainRunLoop addTimer:self.timer forMode:NSRunLoopCommonModes];
+  if (!getenv("AXIOM_SHELL_DRIVE")) {
+    [NSTimer scheduledTimerWithTimeInterval:3600 target:self selector:@selector(checkDaily) userInfo:nil repeats:YES];
+  }
 }
 
 // AppKit ignores Quit while a sheet or modal panel is up. Nobody is there to answer one when the Mac is shutting down.
@@ -244,10 +261,12 @@ static NSString *const SignedOutScript =
     if (access([resources stringByAppendingPathComponent:relative].fileSystemRepresentation, R_OK) != 0)
       return [relative stringByAppendingString:@" is missing"];
   }
-  NSString *manifest = [NSString stringWithContentsOfFile:[resources stringByAppendingPathComponent:@"install-manifest.txt"]
-                                                 encoding:NSUTF8StringEncoding
-                                                    error:nil];
-  if (!manifest) return nil;  // A build from before the manifest, or a test bundle: the key files above were enough.
+  NSString *manifestPath = [resources stringByAppendingPathComponent:@"install-manifest.txt"];
+  // This window and the manifest come from one build, so no manifest is a copy that stopped before reaching it, in whatever order the
+  // Mac copies a folder. It used to pass, and fail inside Python as the message above exists to prevent.
+  if (access(manifestPath.fileSystemRepresentation, F_OK) != 0) return @"install-manifest.txt is missing";
+  NSString *manifest = [NSString stringWithContentsOfFile:manifestPath encoding:NSUTF8StringEncoding error:nil];
+  if (!manifest) return nil;  // Whole, and not readable as text: not worth refusing a working app over.
   NSInteger bad = 0, total = 0;
   NSString *first = nil;
   for (NSString *line in [manifest componentsSeparatedByString:@"\n"]) {
@@ -417,6 +436,16 @@ static NSString *const SignedOutScript =
 - (void)showFailure:(NSDictionary *)state {
   self.mode = ModeFailed;
   self.base = nil;
+  if (self.bootStatus != 0 && !self.bootSignalled && DiskFull()) {
+    // What it would say comes from files it may not have been able to write, and an old state.json would read as a plain stop.
+    Log(@"Showing a failure: the disk is full.");
+    [self showSplash:@"This Mac's disk is full"
+             message:@"AXIOM cannot run without some free space. Your work is safe. Free some space, then try again."
+             percent:nil
+                kind:@"fail"];
+    if (!getenv("AXIOM_SHELL_BACKGROUND")) [self.window makeKeyAndOrderFront:nil];
+    return;
+  }
   NSDictionary *progress = ReadJSON(Native(@"boot.json"));
   NSString *reason = [progress[@"step"] isEqual:@"failed"] ? progress[@"message"] : state[@"reason"];
   BOOL hasReason = [reason isKindOfClass:NSString.class] && reason.length;
@@ -438,7 +467,7 @@ static NSString *const SignedOutScript =
            message:reason
            percent:nil
               kind:@"fail"];
-  [self.window makeKeyAndOrderFront:nil];
+  if (!getenv("AXIOM_SHELL_BACKGROUND")) [self.window makeKeyAndOrderFront:nil];
 }
 
 - (void)startBoot {
@@ -859,7 +888,7 @@ static NSString *const SignedOutScript =
   if ([event paramDescriptorForKeyword:'why?'] || [event attributeDescriptorForKeyword:'why?']) self.quietQuit = YES;
   if (active > 0 && !self.quietQuit) {
     // Quit can arrive while another app is in front (a script, the Dock): the question must be seen, or the quit waits for it.
-    [NSApp activateIgnoringOtherApps:YES];
+    Activate();
     NSDictionary *work = [state[@"work"] isKindOfClass:NSDictionary.class] ? state[@"work"] : @{};
     BOOL stopped = [work[@"stopped"] boolValue];
     NSInteger applying = IntOr(work[@"running"], 0) + IntOr(work[@"submitting"], 0), queued = IntOr(work[@"queued"], 0);
@@ -1175,7 +1204,7 @@ static NSString *const SignedOutScript =
                   alert.informativeText = @"Use Help, Open Logs instead, and send the person who gave you AXIOM the file named supervisor.log.";
                 }
                 [self driveAnswer:alert kind:@"diagnostics"];
-                [NSApp activateIgnoringOtherApps:YES];
+                Activate();
                 [alert runModal];
               }];
 }
@@ -1183,6 +1212,12 @@ static NSString *const SignedOutScript =
 // A person has no other way to learn that a newer AXIOM exists. This only asks GitHub for the newest release's number and opens its
 // page: it never downloads or replaces anything, and says nothing when there is nothing new, unless they asked.
 - (IBAction)checkForUpdates:(id)sender { [self checkUpdates:YES]; }
+
+// A Mac left applying for a week never opens the dashboard again, and "once a day" should still hold. checkUpdates: looks at the date
+// first, so this costs nothing on the other 23 hours.
+- (void)checkDaily {
+  if (self.mode == ModeDashboard) [self checkUpdates:NO];
+}
 
 - (void)checkUpdates:(BOOL)asked {
   NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
@@ -1217,12 +1252,17 @@ static NSString *const SignedOutScript =
                   [alert.window center];
                   [alert.window orderFront:nil];  // Not a sheet or a modal: Quit must always work (see the battery warning).
                 } else if (asked) {
+                  // Only a number GitHub gave can make this one the newest. A private repository and one with nothing published both
+                  // answer 404, and a check that printed nothing at all (a damaged install) has no answer to report.
+                  BOOL failed = error.length || !answer.count;
+                  BOOL known = [latest isKindOfClass:NSString.class] && latest.length;
                   NSAlert *alert = [NSAlert new];
-                  alert.messageText = error.length ? @"Could not check for updates" : @"AXIOM is up to date";
-                  alert.informativeText = error.length ? [error stringByAppendingString:@" Check your internet connection and try again."]
-                                                       : [NSString stringWithFormat:@"You have version %@, the newest.", answer[@"current"] ?: @""];
+                  alert.messageText = failed ? @"Could not check for updates" : known ? @"AXIOM is up to date" : @"No update to offer";
+                  alert.informativeText = failed ? [error.length ? error : @"The check did not finish." stringByAppendingString:@" Check your internet connection and try again."]
+                                          : known ? [NSString stringWithFormat:@"You have version %@, the newest.", answer[@"current"] ?: @""]
+                                                  : [NSString stringWithFormat:@"You have version %@. No newer version has been published where AXIOM can see it.", answer[@"current"] ?: @""];
                   [self driveAnswer:alert kind:@"update"];
-                  [NSApp activateIgnoringOtherApps:YES];
+                  Activate();
                   [alert runModal];
                 }
               }];
@@ -1255,14 +1295,16 @@ static NSString *const SignedOutScript =
     [NSFileManager.defaultManager createFileAtPath:path contents:nil attributes:nil];
     file = [NSFileHandle fileHandleForWritingAtPath:path];
   }
-  [file seekToEndOfFile];
-  [file writeData:[[text stringByAppendingString:@"\n"] dataUsingEncoding:NSUTF8StringEncoding]];
-  [file closeFile];
+  [file seekToEndReturningOffset:nil error:nil];
+  [file writeData:[[text stringByAppendingString:@"\n"] dataUsingEncoding:NSUTF8StringEncoding] error:nil];
+  [file closeAndReturnError:nil];
   return YES;
 }
 
 - (void)driveAnswer:(NSAlert *)alert kind:(NSString *)kind {
-  if (![self driveNoted:@"dialog" text:[NSString stringWithFormat:@"%@: %@", kind, alert.messageText]]) return;
+  NSArray *buttons = [alert.buttons valueForKey:@"title"];
+  NSString *said = [NSString stringWithFormat:@"%@: %@ | %@ | %@", kind, alert.messageText, alert.informativeText, [buttons componentsJoinedByString:@", "]];
+  if (![self driveNoted:@"dialog" text:said]) return;
   if (!alert.buttons.count) [alert addButtonWithTitle:@"OK"];
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{
     [alert.buttons.firstObject performClick:nil];
