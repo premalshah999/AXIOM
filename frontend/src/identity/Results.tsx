@@ -217,13 +217,13 @@ function SuccessPanel({ ledger }: { ledger: Success[] | null }) {
         <p className="ov-caption">
           The last two are of the jobs it could apply to.
           {lesser > 0 &&
-            ` ${lesser.toLocaleString()} of the ${all.confirmed.toLocaleString()} confirmed rest on less: the platform's answer (${all.evidence.medium.toLocaleString()}), or a note or a quoted page (${all.evidence.weak.toLocaleString()}).`}
+            ` ${lesser.toLocaleString()} of the ${all.confirmed.toLocaleString()} confirmed rest on less: the platform's answer (${all.evidence.medium.toLocaleString()}), or a weaker record such as a note or a quoted page (${all.evidence.weak.toLocaleString()}).`}
         </p>
         {ledger && (
           <p className="ov-caption">
             Applications shows {sent.toLocaleString()} sent in {week}
             {earlier > 0 ? `: these ${all.confirmed.toLocaleString()}, and ${earlier.toLocaleString()} first tried before them.` : "."}
-            {onFile > 0 && ` It also keeps ${onFile.toLocaleString()} the employer already had on file, which AXIOM did not send.`}
+            {onFile > 0 && ` All time, it also keeps ${onFile.toLocaleString()} with no send of AXIOM's behind them, such as an application the employer already had on file.`}
           </p>
         )}
         {small.length > 0 && <p className="ov-caption">Not judged, with fewer than 8 jobs: {small.map((p) => platformName(p.ats)).join(", ")}.</p>}
