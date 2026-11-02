@@ -479,6 +479,83 @@ def test_shape_is_settled_by_code_order_proof_points_and_one_third_bullet():
     assert quality.proposal_issues(fixed, [], POSTING) == []
 
 
+@pytest.mark.parametrize(
+    "written, reads",
+    [
+        ("Will build a FastAPI identity service from OWASP data.", "Builds a FastAPI identity service from OWASP data."),
+        ("Will weigh token validation, and will report test coverage.", "Weighs token validation, and reports test coverage."),
+        ("Build a Python report browser using NYC Open Data.", "Builds a Python report browser using NYC Open Data."),
+        ("Compare query results, then will also apply a fix.", "Compares query results, then applies a fix."),
+        ("FastAPI identity service that issues session cookies.", "FastAPI identity service that issues session cookies."),
+        ("Handles partial failures with bounded retries.", "Handles partial failures with bounded retries."),
+    ],
+)
+def test_a_draft_reads_as_a_description_not_a_to_do_list(written, reads):
+    assert quality.describe(written) == reads
+
+
+def test_rewording_never_turns_a_draft_into_finished_work():
+    ps = proposals()
+    ps[0].bullets[0] = "Will build a public explorer from NYC Open Data, and will save 94.7% of review time."
+    fixed = quality.normalize_proposals(ps)
+    problems = quality.proposal_problems(fixed[0], [], POSTING)
+    assert any("unmeasured" in w for w in problems)  # an invented number still fails, however it is worded
+    ps = proposals()
+    ps[0].bullets[0] = "Built and shipped a public explorer from NYC Open Data."
+    assert any("completed work" in w for w in quality.proposal_problems(quality.normalize_proposals(ps)[0], [], POSTING))
+
+
+def test_a_tailored_page_is_tight_at_the_owners_sizes():
+    style = editor.tailored_style(editor.Style())
+    assert {style.margin_top, style.margin_bottom, style.margin_left, style.margin_right} == {0.25}
+    assert (style.section_gap, style.entry_gap, style.bullet_gap) == (3, 1, 0)
+    assert style.name_size == 16.0 and style.font_size == 9.0
+
+
+def test_the_long_replies_get_room_and_others_keep_the_default():
+    from jobpilot.features.knowledge.writing import LONG_REPLIES
+
+    assert LONG_REPLIES["Imported"][0] >= 8000 and LONG_REPLIES["Imported"][1] >= 120
+    assert "Answer" not in LONG_REPLIES and "Brief" not in LONG_REPLIES
+
+
+def test_a_draft_figure_is_allowed_only_as_a_stated_target():
+    ps = proposals()
+    ps[0].bullets[0] = "Public record explorer built on NYC Open Data for readers [target: p95 under 200 ms]."
+    assert quality.proposal_problems(ps[0], [], POSTING) == []
+    ps[0].bullets[0] = "Public record explorer on NYC Open Data with p95 under 200 ms."  # stated as fact
+    assert any("unmeasured" in w for w in quality.proposal_problems(ps[0], [], POSTING))
+    ps[0].bullets[0] = "Public record explorer on NYC Open Data [p95 under 200 ms]."  # brackets that don't say target
+    assert any("unmeasured" in w for w in quality.proposal_problems(ps[0], [], POSTING))
+    ps[0].bullets[0] = "Public record explorer on NYC Open Data [target: 95% parsed], cutting review time by 40%."
+    assert any("unmeasured" in w for w in quality.proposal_problems(ps[0], [], POSTING))
+    ps[0].bullets = [
+        "Public record explorer on NYC Open Data [target: 95% parsed].",
+        "Handles missing fields without dropping rows [target: under 1% lost].",
+    ]
+    assert any("one headline metric" in w for w in quality.proposal_problems(ps[0], [], POSTING))
+
+
+async def test_choosing_a_mode_again_retries_a_stored_failure(monkeypatch):
+    from types import SimpleNamespace
+
+    calls = []
+
+    async def prepare(db, config, job_id, *, mode, model, fresh, **kw):
+        calls.append(fresh)
+        return SimpleNamespace(status="failed", cached=not fresh, artifact=None, error=None)
+
+    async def read(*a, **k):
+        return None
+
+    monkeypatch.setattr(choice.pipeline, "prepare_resume", prepare)
+    monkeypatch.setattr(choice, "read_posting", read)
+    monkeypatch.setattr(choice, "get_choice", lambda db, job_id: SimpleNamespace(mode="aggressive"))
+    monkeypatch.setattr(choice, "_record", lambda *a, **k: None)
+    await choice.run(None, None, "job")
+    assert calls == [False, True]
+
+
 def test_keep_sound_never_keeps_a_draft_that_fails_a_truth_check():
     ps = proposals()
     ps[0].bullets[0] = "Built and shipped a public explorer from NYC Open Data."  # claims finished work
@@ -527,7 +604,7 @@ def test_critique_can_fix_pending_generated_projects(tmp_path):
     source, ctx = context(tmp_path, model=model)
     result = asyncio.run(run(JOB, source, PROFILE, ctx))
     assert result.report["critique_fixes_applied"]
-    assert revised[0].bullets[1] in result.drafts[0].bullets
+    assert quality.describe(revised[0].bullets[1]) in result.drafts[0].bullets
     assert result.report["workspace_revision"] == 1
 
 

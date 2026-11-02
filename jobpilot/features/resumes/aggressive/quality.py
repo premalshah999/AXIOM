@@ -72,8 +72,46 @@ def in_posting(posting, tool):
     return bool(words) and all(contains(posting, w) for w in words)
 
 
+# A draft's figure is an inspired value, and says so on the resume itself: the employer sees the PDF, not the app's notes.
+TARGET = re.compile(r"\[target:[^\]]{1,90}\]", re.I)
+FUTURE = re.compile(r"\b(?:will|would|should|shall)\s+(?:also\s+)?([a-z]+)", re.I)
+COMMAND = re.compile(
+    r"^(Add|Analy[sz]e|Benchmark|Build|Check|Collect|Compare|Create|Design|Develop|Document|Evaluate|Implement|Make|Map|Measure|"
+    r"Model|Parse|Run|Test|Train|Track|Use|Validate|Write)\b"
+)
+IRREGULAR = {"be": "is", "have": "has", "do": "does", "go": "goes"}
+
+
+def third_person(verb):
+    if verb.lower() in IRREGULAR:
+        said = IRREGULAR[verb.lower()]
+    elif re.search(r"(?:s|x|z|ch|sh)$", verb, re.I):
+        said = verb + "es"
+    elif re.search(r"[^aeiou]y$", verb, re.I):
+        said = verb[:-1] + "ies"
+    else:
+        said = verb + "s"
+    return said.capitalize() if verb[:1].isupper() else said
+
+
+def describe(bullet):
+    """A draft reads as a description of the project, not a to-do list: "Will build X" and "Build X" say "Builds X". The prompt
+    asks for this; a bullet that still arrives as an instruction is settled here. It never makes a draft claim finished work."""
+
+    def said(match):
+        opening = match.start() == 0 or bullet[: match.start()].rstrip()[-1:] in ".:;"
+        word = third_person(match[1])
+        return word.capitalize() if opening else word
+
+    text = FUTURE.sub(said, bullet.strip())
+    return COMMAND.sub(lambda m: third_person(m[1]), text)
+
+
 def normalize_proposals(proposals):
-    """Shape is arithmetic, so code settles it. Order by proof point, give each proposal its own, and keep one third bullet."""
+    """Shape is arithmetic, so code settles it. Order by proof point, give each proposal its own, keep one third bullet, and
+    word each bullet as a description."""
+    for p in proposals:
+        p.bullets = [describe(b) for b in p.bullets]
     ordered = sorted(proposals, key=lambda p: p.proof_point)
     free = [i for i in range(len(ordered)) if i not in {p.proof_point for p in ordered}]
     seen = set()
@@ -110,8 +148,8 @@ def proposal_problems(p, history, posting):
         problems.append(f"{p.title}: a solo project needs solo obstacles")
     if sum(bool(gates.ANY_METRIC.search(b)) for b in p.bullets) > 1:
         problems.append(f"{p.title}: at most one headline metric")
-    if any(gates.ANY_METRIC.search(b) and "[measure after building]" not in b for b in p.bullets):
-        problems.append(f"{p.title}: mark unmeasured results [measure after building]")
+    if any(gates.ANY_METRIC.search(TARGET.sub("", b)) for b in p.bullets):
+        problems.append(f"{p.title}: mark unmeasured results [target: ...]")
     if any(re.match(r"Built|Deployed|Achieved|Reduced|Shipped|Saved", b) for b in p.bullets):
         problems.append(f"{p.title}: proposed work must not claim completed work")
     if inputs[norm(p.data_source)] >= 3 and any(
