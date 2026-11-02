@@ -165,7 +165,7 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
   const goal = typed ?? limit;
   const setGoal = (value: number) => setTyped(value);
   const saveLimit = (raw: number) => {
-    const value = Math.max(1, Math.min(500, Math.round(raw || limit)));
+    const value = Math.max(1, Math.min(1000, Math.round(raw || limit)));
     if (value === limit) {
       setTyped(null);
       return Promise.resolve();
@@ -263,7 +263,7 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
       className="ov-key"
       onSubmit={(e) => {
         e.preventDefault();
-        const value = Math.max(1, Math.min(500, Math.round(goal || limit)));
+        const value = Math.max(1, Math.min(1000, Math.round(goal || limit)));
         // A batch sends on its own, which turns "Let me review first" off. Said before it happens, not found out afterwards.
         if (!snapshot.control.auto_submit || reviewing || !permitted) setConfirmStart(value);
         else begin(value);
