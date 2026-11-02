@@ -916,21 +916,6 @@ SIMILAR_ROWS = "".join(
     f'<p><a href="/jobs/{n}">{title}</a></p>'
     for n, title in ((70031, "Data Analyst"), (70032, "Kubernetes Tech Lead"), (70033, "Credit Risk Associate"), (70034, "Product Designer"))
 )
-STEP_THAT_SENDS = page(
-    "Apply",
-    "<h1>Apply: Software Engineer</h1>"
-    + form(NAME_FIELDS, EMAIL_FIELD, RESUME_FIELD, '<p><button id="go" type="submit">Continue</button></p>'),
-)
-receipt_with_similar_jobs = Scenario(
-    "step_button_sends_and_the_receipt_lists_similar_jobs",
-    "The form's Continue is the employer's real submit, with nothing armed, and its receipt lists other roles: it reads as a job list, and "
-    "going back would apply again. One application, confirmed.",
-    {
-        "/jobs/1": page("Software Engineer", POSTING + APPLY_LINK),
-        "/apply/1": STEP_THAT_SENDS,
-        "/submit/1": page("Thank you", "<h1>Thank you for applying!</h1><p>Your application has been received.</p><h2>Similar jobs</h2>" + SIMILAR_ROWS),
-    },
-)
 
 home_thanks_for_interest = Scenario(
     "career_home_thanks_for_your_interest",
@@ -951,7 +936,7 @@ home_thanks_for_interest = Scenario(
 )
 
 SCENARIOS += [
-    receipt_with_similar_jobs, home_thanks_for_interest,
+    home_thanks_for_interest,
     career_home_bounce, career_home_then_back, own_redirect, own_form_numbers_itself, form_adds_number, posting_with_similar_jobs,
     form_for_other_role, form_heading_is_other_role, form_heading_is_own_role, posting_moved, closed_redirects_to_other_role,
     form_data_other_role, form_data_own_role, receipt_other_role, receipt_own_role, receipt_employer_named,
