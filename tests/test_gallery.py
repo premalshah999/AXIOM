@@ -22,6 +22,7 @@ from jobpilot.schemas import JobInput
 
 from gallery.scenarios import SCENARIOS
 from gallery.site import Site
+from support_budget import scaled
 
 pytestmark = [pytest.mark.browser, pytest.mark.gallery, pytest.mark.integration]
 RUN_SECONDS = 150  # Generous on a busy Mac: a healthy scenario takes 3 to 20 s.
@@ -68,7 +69,7 @@ async def run_scenario(service, scenario, mode="submit"):
     allow(service.db, [job["id"]])  # A local page reads as a company's own site: the owner's click sends it.
     try:
         run = await service.queue(job["id"], mode, resume_id, owner_pick=True)
-        await asyncio.wait_for(service.execute(run["id"]), RUN_SECONDS)
+        await asyncio.wait_for(service.execute(run["id"]), scaled(RUN_SECONDS))
     finally:
         site.close()
     with service.db.session() as s:

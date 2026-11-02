@@ -35,6 +35,7 @@ from jobpilot.discovery import add_job
 from jobpilot.host_health import is_browser_outage
 from jobpilot.schemas import JobInput
 from mail_formats import KINDS, ME, PLATFORMS, deliver, fresh_code
+from support_budget import scaled
 from test_mail_fresh_install import link_for, onboard
 
 pytestmark = [pytest.mark.browser, pytest.mark.integration]
@@ -290,7 +291,7 @@ async def chrome_opens_a_tab(address):
     """In the app the worker Chrome has been up for minutes when a run attaches. Here it is seconds old: it writes its port file
     before it can answer, and a run that attached then on a loaded Mac ended "AXIOM's browser wasn't ready" having sent nothing
     (dayforce-code, 2026-11-01). The test starts when Chrome has answered and opened a tab, not after some number of seconds."""
-    deadline = time.monotonic() + RUN_SECONDS
+    deadline = time.monotonic() + scaled(RUN_SECONDS)
     async with httpx.AsyncClient(timeout=30, trust_env=False, headers={"Host": "localhost"}) as client:
         while True:
             try:
@@ -363,7 +364,7 @@ async def one_run(client, service, imap, platform, kind, *, delay=DELAY, profile
     try:
         result = await apply(service, job["id"])  # The Apply button.
         outcome["applied"] = str(result)[:120]
-        deadline = time.monotonic() + RUN_SECONDS
+        deadline = time.monotonic() + scaled(RUN_SECONDS)
         retries = OUTAGE_RETRIES
         while time.monotonic() < deadline:
             await asyncio.sleep(0.25)  # a poll of the database, not a pace: the run ends within a quarter second of finishing
@@ -477,7 +478,7 @@ async def test_two_employers_on_one_shared_sender_in_two_real_runs_each_type_the
     try:
         for job_id in jobs:
             await apply(service, job_id)
-        deadline = time.monotonic() + RUN_SECONDS
+        deadline = time.monotonic() + scaled(RUN_SECONDS)
         retries = dict.fromkeys(jobs, OUTAGE_RETRIES)
         while time.monotonic() < deadline and not ("code" in first.used and "code" in second.used):
             await asyncio.sleep(1)
