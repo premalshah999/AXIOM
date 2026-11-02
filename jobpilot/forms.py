@@ -1457,6 +1457,7 @@ class FormSession:
         self.accept_prefilled = False
         # Take over's hand-back (steer.py): what the owner typed into the page is the owner's answer on the page they left.
         self.owner_hands = None
+        self.owner_snapshot = None
         self.resume_seen = False
         self.workday_resume_replaced = False
         self.control_recoveries = {}
@@ -1698,28 +1699,48 @@ class FormSession:
 
     def adopt_owner_values(self):
         """The owner finished part of this page by hand (Take over, then Done, continue): a value they typed or chose is their
-        answer, and the engine does not ask again or write over it. Only the page they left counts (its headings are noted at
-        the first pass): the next page's pre-filled values are checked as ever."""
+        answer, and the engine does not ask again or write over it. Only what was on the page at hand-back counts: the first
+        pass snapshots each field and value actually there (owner_snapshot), and owner_by_hand binds to exactly those. A later
+        step that keeps the same title and headings is a different page: a field absent from the snapshot, or one whose value
+        is no longer the snapshot's, goes through normal answer resolution; when none of the snapshot's fields remain the
+        authorization is revoked."""
         if self.owner_hands is None:
             return
         page = tuple(self.meta.get("headings") or []) + (self.meta.get("title", ""),)
-        if self.owner_hands is True:
-            self.owner_hands = page
-        if page != self.owner_hands:
-            self.owner_hands = None
-            return
-        kept = 0
+        eligible = {}
         for f in self.fields.values():
             if f["type"] in {"file", "password", "button"} or f.get("site_account") or not has_value(f) or not f["valid"]:
                 continue
             if AUTH.search(f["label"]):
                 continue
+            eligible[self.field_key(f)] = f
+        if self.owner_hands is True:
+            self.owner_hands = page
+            self.owner_snapshot = {k: f["value"] for k, f in eligible.items()}
+        snapshot = self.owner_snapshot or {}
+        present = {self.field_key(f) for f in self.fields.values()}
+        if page != self.owner_hands or not (set(snapshot) & present):
+            self.owner_hands = None
+            self.owner_snapshot = None
+            return
+        kept = 0
+        for key, f in eligible.items():
+            if key not in snapshot or snapshot[key] != f["value"]:
+                continue
             self.expected[f["id"]] = f["value"]
-            self.expected_slots[self.field_key(f)] = f["value"]
+            self.expected_slots[key] = f["value"]
             self.record_answer(f, f["value"], ["owner_by_hand"], verified=True)
             kept += 1
         if kept:
             self.emit("owner_values", "Kept what the owner entered by hand on this page", {"fields": kept})
+
+    def owner_handed(self, x):
+        """True when this field is one the owner handed back as it stands (adopt_owner_values): the fill pass leaves it be."""
+        if not self.owner_hands or x["id"] not in self.expected or x["id"] not in self.ledger:
+            return False
+        if "owner_by_hand" not in (self.ledger[x["id"]].get("evidence_ids") or []):
+            return False
+        return (self.owner_snapshot or {}).get(self.field_key(x), object()) == x.get("value")
 
     def record_answer(self, field, value, evidence_ids, verified=False):
         from .answer_context import digest
@@ -4730,8 +4751,7 @@ class FormSession:
                     x["type"] in ("file", "password")
                     or x.get("site_account")
                     or handled.get(x["id"]) == self.question_shape(x)
-                    or (self.owner_hands and x["id"] in self.expected and x["id"] in self.ledger
-                        and "owner_by_hand" in (self.ledger[x["id"]].get("evidence_ids") or []))
+                    or self.owner_handed(x)
                     or AUTH.search(x["label"])
                     or (
                         self.accept_prefilled
