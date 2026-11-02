@@ -139,6 +139,16 @@ def router(service) -> APIRouter:
 
         if not service.dispatch:
             raise HTTPException(409, "Application workers are disabled")
+        if "target" in data.model_fields_set and data.target != config.daily_application_limit:
+            # The number beside Start is the daily limit (Settings › Limits › Applications per day): one value.
+            from ... import connections
+            from ...config import settings
+            from ...autopilot import apply_daily_limit
+
+            connections.save(config, {"daily_application_limit": str(data.target)})
+            if (cached := settings()) is not config:
+                connections.apply(cached)
+            apply_daily_limit(db, config.daily_application_limit)
         return {**await start_autonomous(service, data.target), "runtime": batch_snapshot(service)}
 
     @r.get("/api/startable")
@@ -229,6 +239,8 @@ def router(service) -> APIRouter:
 
     @r.put("/api/job-board/settings")
     def update(data: BoardSettings):
+        # The goal is the daily limit (Settings › Limits); this form no longer carries a second number.
+        data = data.model_copy(update={"batch_target": config.daily_application_limit})
         if data.auto_apply:
             from ...autopilot import start_batch
 

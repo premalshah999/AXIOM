@@ -44,7 +44,10 @@ const shown = (f: ConnectionField) => (f.pending || f.value || "") as string;
  * when its draft differs from what is saved, so typing a value back is not a change.
  */
 export function useConnections() {
-  const state = usePoll<Connections>((signal) => api("/connections", "GET", undefined, signal), 60000);
+  // Read again whenever the workspace refreshes, so a value changed on another screen (the dashboard's daily limit) shows here
+  // without a reload.
+  const { version, refresh: refreshWorkspace } = useWorkspace();
+  const state = usePoll<Connections>((signal) => api("/connections", "GET", undefined, signal), 60000, [version]);
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [results, setResults] = useState<Record<string, TestResult>>({});
   // Bumped when a save or discard settles, so a card that was open for typing closes.
@@ -66,6 +69,17 @@ export function useConnections() {
       else next[name] = value;
       return next;
     });
+  // The daily limit is one value shared with the dashboard: when it changes there, an unsaved edit here is out of date.
+  const limitField = by("daily_application_limit");
+  const savedLimit = limitField ? shown(limitField) : "";
+  useEffect(() => {
+    setDraft((d) => {
+      if (!("daily_application_limit" in d)) return d;
+      const next = { ...d };
+      delete next.daily_application_limit;
+      return next;
+    });
+  }, [savedLimit]);
   const changes = Object.keys(draft);
   const restartNeeded = changes.some((name) => by(name)?.restart);
   return {
@@ -93,6 +107,7 @@ export function useConnections() {
           setDraft({});
           setEpoch((e) => e + 1);
           await state.refresh();
+          await refreshWorkspace(); // the dashboard reads the daily limit from the workspace snapshot
         },
         restartNeeded ? "Saved. Worker settings apply after the app restarts." : "Settings saved.",
       ),

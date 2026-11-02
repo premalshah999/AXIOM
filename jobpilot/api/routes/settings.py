@@ -67,6 +67,10 @@ def router(service) -> APIRouter:
         cached = settings()
         if cached is not config:
             connections.apply(cached)  # Code that reads settings() directly sees the same keys at once.
+        if "daily_application_limit" in data.values:
+            from ...autopilot import apply_daily_limit
+
+            apply_daily_limit(db, config.daily_application_limit)
         return connections.status(config)
 
     @r.post("/api/connections/{name}/test")

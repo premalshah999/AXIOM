@@ -156,8 +156,8 @@ def router(service) -> APIRouter:
         from ...features.resumes.choice import waiting_words
 
         # The reason is what the last try found, so it can still say "Preparing" after the resume was made.
-        words = waiting_words(db, [item["id"] for item in waiting])
-        waiting = [{**item, "reason": words[item["id"]]} if item["id"] in words else item for item in waiting]
+        words = waiting_words(db, [item["job_id"] for item in waiting])
+        waiting = [{**item, "reason": words[item["job_id"]]} if item["job_id"] in words else item for item in waiting]
         waiting.sort(key=lambda item: item["requested_at"])
         return {"active": active, "waiting": waiting}
 
