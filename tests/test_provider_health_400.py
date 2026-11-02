@@ -161,3 +161,17 @@ def test_an_account_out_of_credit_holds_new_work_for_half_an_hour(service):
     retry_at = service.db.get_setting(provider_health.key(service.config))["retry_at"]
     assert retry_at - started >= provider_health.QUOTA_COOLDOWN_SECONDS - 5
     assert provider_health.acquire(service.db, service.config, 25) is None
+
+
+def test_an_empty_account_or_refused_key_is_named_not_called_an_outage(service):
+    """A run parked behind a quota or key refusal said "provider is unavailable", as for an outage."""
+    assert provider_health.account_reason(service.db, service.config) is None
+    for failure, words in (("quota_exhausted", "out of credit"), ("auth_rejected", "refused your API key")):
+        ticket = provider_health.acquire(service.db, service.config, 25)
+        provider_health.finish(service.db, service.config, ticket, failure=failure)
+        assert words in provider_health.account_reason(service.db, service.config)
+        service.db.set_setting(provider_health.key(service.config), {})
+    ticket = provider_health.acquire(service.db, service.config, 25)
+    provider_health.finish(service.db, service.config, ticket, failure="transport_error")
+    provider_health.finish(service.db, service.config, ticket, failure="transport_error")
+    assert provider_health.account_reason(service.db, service.config) is None

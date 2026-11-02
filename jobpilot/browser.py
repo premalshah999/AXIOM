@@ -2433,9 +2433,18 @@ class BrowserEngine:
         from .agent_settings import AgentDisabled
 
         if AnswerModelUnavailable.caused_by(exc):
+            from .provider_health import account_reason
+
+            try:
+                account = account_reason(self.db, self.config)
+            except Exception:
+                account = None  # The cause is only a label; it never changes what the run does next.
             return {
                 "state": "submission_unknown" if self.armed else "waiting_browser",
-                "reason": "The selected model provider is unavailable; draft retained without further model requests",
+                # The prefix stays what the own-trouble lists (application_budget, loop_guard) match; a refused key or an
+                # empty account then says what to do.
+                "reason": "The selected model provider is unavailable"
+                + (f": {account}" if account else "; draft retained without further model requests"),
                 "blocker_type": "site_transient",
                 "recovery_cause": "" if self.armed else "provider_unavailable",
                 "diagnostics": {"exception": type(exc).__name__},
