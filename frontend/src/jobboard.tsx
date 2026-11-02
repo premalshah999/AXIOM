@@ -251,7 +251,7 @@ export function BoardView() {
       header: "Job",
       width: 420,
       truncate: true,
-      min: 220,
+      min: 200,
       cell: (r) => (
         <div className="bd-cell">
         <button
@@ -297,17 +297,17 @@ export function BoardView() {
     {
       key: "why",
       header: fit === "match" ? "Why it fits" : "Why",
-      hideBelow: 600,
+      hideBelow: 860,
       width: 340,
       truncate: true,
-      min: 180,
+      min: 165,
       cell: (r) => (
         <span className="bd-line" title={r.line}>
           {r.line || "—"}
         </span>
       ),
     },
-    { key: "when", header: "Posted, and where from", hideBelow: 860, cell: (r) => <When r={r} now={now} /> },
+    { key: "when", header: "Posted, and where from", hideBelow: 1100, cell: (r) => <When r={r} now={now} /> },
     { key: "state", header: "Status", hideBelow: 600, cell: (r) => <StateCell r={r} asked={inLine(r)} onQueue={() => go({ view: "queue" })} /> },
     {
       key: "act",

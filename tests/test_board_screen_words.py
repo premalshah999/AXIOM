@@ -50,7 +50,7 @@ def test_how_to_apply_keeps_its_width_in_a_row():
     # The pinned column squeezed it to an empty box on every row of the board.
     css = read("styles/queue.css")
     rule = css[css.index(".ax-act .tl-choice.is-compact .tl-choice-pick") :]
-    assert "flex: none" in rule[: rule.index("}")] and "width: 108px" in rule[: rule.index("}")]
+    assert "flex: none" in rule[: rule.index("}")] and "width: 88px" in rule[: rule.index("}")]
 
 
 def test_words_with_no_link_in_them_are_answered():
