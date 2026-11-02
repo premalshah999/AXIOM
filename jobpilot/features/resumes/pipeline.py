@@ -112,6 +112,13 @@ def job_identity(url: str) -> str:
         return url.strip()
 
 
+def answers_key(db, config) -> str:
+    """The key the model call will really use: the provider chosen for writing in Settings, which needn't be the install's default provider."""
+    from ...agent_settings import for_role
+
+    return for_role(db, config, "answers").llm_api_key
+
+
 def model_drafter(db, config) -> Drafter | None:
     """Deprecated (v1). Kept so existing callers keep working; prepare_resume now
     uses the configured structured model for the master-preserving pipeline."""
@@ -350,7 +357,7 @@ async def prepare_resume(
                 detail="Tailoring starts from your approved master. Until then applications use your master PDF.",
             ),
         )
-    if model is None and getattr(config, "llm_api_key", ""):
+    if model is None and answers_key(db, config):
         from ..knowledge.writing import configured_model
 
         model = configured_model(db, config)

@@ -40,6 +40,9 @@ type View = {
   ats_pdf: number | null;
   rules: { ok: boolean; problems: Problem[]; warnings: Problem[]; typography?: { ok: boolean; sizes: Record<string, number[]> } | null; pages?: number | null } | null;
   rule_problems: Problem[];
+  failure: { message: string; fix: keyof typeof FIXES | null } | null;
+  started: boolean;
+  in_line: boolean;
   parse: { ok: boolean; items: { label: string; ok: boolean; detail: string }[] } | null;
   report: { workspace_id?: string; changed_bullets?: number; added_skills?: string[]; refused?: { id: string; reason: string }[]; overflow?: boolean; summary_origin?: string };
   preview_rules: View["rules"];
@@ -128,14 +131,14 @@ function Marked({ text, keywords }: { text: string; keywords: { pattern: string;
 }
 
 /** A plain text box with marks drawn behind its words, so what you type is highlighted as you type it. */
-function MarkedArea({ value, onChange, keywords, label, invalid, onBlur }: { value: string; onChange: (v: string) => void; keywords: Keyword[]; label: string; invalid?: boolean; onBlur?: () => void }) {
+function MarkedArea({ value, onChange, keywords, label, invalid, onBlur, readOnly }: { value: string; onChange: (v: string) => void; keywords: Keyword[]; label: string; invalid?: boolean; onBlur?: () => void; readOnly?: boolean }) {
   return (
     <div className={"tl-area" + (invalid ? " is-invalid" : "")}>
       <div className="tl-area-marks" aria-hidden="true">
         <Marked text={value} keywords={keywords} />
         {"\n"}
       </div>
-      <textarea aria-label={label} aria-invalid={invalid || undefined} value={value} rows={1} spellCheck onBlur={onBlur} onChange={(e) => onChange(e.target.value)} />
+      <textarea aria-label={label} aria-invalid={invalid || undefined} value={value} rows={1} spellCheck readOnly={readOnly} onBlur={onBlur} onChange={(e) => onChange(e.target.value)} />
     </div>
   );
 }
@@ -172,13 +175,17 @@ function Diff({ from, to }: { from: string; to: string }) {
 }
 
 // ---------- The small control, for wherever a job is queued ----------
+/** The screen a tailored resume was opened from, so Back returns there and not always to the Queue. */
+let cameFrom: { view: string; tab?: string; filter?: string; job?: string } | null = null;
+const BACK_WORDS: Record<string, string> = { queue: "Queue", board: "Job board", review: "Review batch", needs: "Needs you", ledger: "Applications", resumes: "Resumes", overview: "Overview" };
+
 /**
  * "Apply" or "Apply with tailored resume" and a mode. Off by default. On a list, pass `known` and `modes` from one GET /v2/resumes/tailor/choices?job_ids=... so
  * that each row doesn't ask for itself; alone, it reads for itself. `onChange` hears the state, so a row can react.
  * `listed`: the list owns the state (it fetches once for the page and polls the rows that are preparing), so this row never asks and shows what it is given.
  */
 export function TailorChoice({ jobId, known, modes, compact, listed, onChange }: { jobId: string; known?: TailorState | null; modes?: Mode[]; compact?: boolean; listed?: boolean; onChange?: (s: TailorState | null) => void }) {
-  const { go } = useWorkspace();
+  const { go, route } = useWorkspace();
   const [own, setOwn] = useState<{ choice: TailorState | null; modes: Mode[]; error?: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const choice = listed ? known ?? null : known !== undefined && !own ? known : own?.choice ?? null;
@@ -210,7 +217,10 @@ export function TailorChoice({ jobId, known, modes, compact, listed, onChange }:
       setBusy(false);
     }
   };
-  const open = () => go({ view: "tailor", tailor: jobId, job: undefined, run: undefined });
+  const open = () => {
+    cameFrom = { view: route.view, tab: route.tab, filter: route.filter, job: route.job };
+    go({ view: "tailor", tailor: jobId, job: undefined, run: undefined });
+  };
   return (
     <div className={"tl-choice" + (compact ? " is-compact" : "")}>
       <label className="tl-choice-pick">
@@ -300,7 +310,8 @@ export function TailorApprovalRow() {
 // ---------- The screen ----------
 function useBack() {
   const { go } = useWorkspace();
-  return () => go({ view: "queue" });
+  const to = cameFrom;
+  return { label: to ? BACK_WORDS[to.view] ?? "Back" : "Queue", go: () => go(to ? ({ tailor: undefined, ...to } as Parameters<typeof go>[0]) : { view: "queue", tailor: undefined }) };
 }
 
 export function TailorView() {
@@ -308,6 +319,8 @@ export function TailorView() {
   const jobId = route.tailor;
   const [view, setView] = useState<View | null>(null);
   const [error, setError] = useState("");
+  // Above Review, which starts over with each new version: "Saved" and "Approved" are said about the version that replaced it.
+  const [notice, setNotice] = useState<{ text: string; bad?: boolean } | null>(null);
   const refresh = useRef(async () => undefined as void);
   refresh.current = async () => {
     if (!jobId) return;
@@ -320,6 +333,7 @@ export function TailorView() {
   };
   useEffect(() => {
     setView(null);
+    setNotice(null);
     void refresh.current();
   }, [jobId]);
   const preparing = view?.choice?.state === "preparing";
@@ -330,14 +344,20 @@ export function TailorView() {
   }, [preparing]);
   const back = useBack();
   if (!jobId) return <div className="ax-page"><p className="ax-note">Open a job and choose Apply with tailored resume.</p></div>;
-  if (error && !view) return <div className="ax-page"><p className="ax-error" role="alert">{error}</p></div>;
+  if (error && !view)
+    return (
+      <div className="ax-page">
+        <p className="ax-error" role="alert">{error}</p>
+        <p><button type="button" className="ax-link" onClick={back.go}>Back to {back.label === "Back" ? "where you were" : back.label}</button></p>
+      </div>
+    );
   if (!view) return <div className="ax-page"><Loading /></div>;
   return (
     <div className="ax-page tl-page">
       <header className="tl-head">
         <div className="tl-head-main">
-          <button type="button" className="ax-link tl-back" onClick={back}>
-            <ArrowLeft size={14} aria-hidden="true" /> Queue
+          <button type="button" className="ax-link tl-back" onClick={back.go}>
+            <ArrowLeft size={14} aria-hidden="true" /> {back.label}
           </button>
           <h2>
             {view.job.title || "Untitled role"}
@@ -348,12 +368,12 @@ export function TailorView() {
       </header>
       {view.choice?.state === "preparing" ? (
         <p className="tl-working" role="status">
-          Tailoring your resume{view.estimates[view.choice.mode] != null ? `. About ${cents(view.estimates[view.choice.mode])} in AI costs.` : "."}
+          Tailoring your resume{view.estimates[view.choice.mode] != null ? `. About ${cents(view.estimates[view.choice.mode])} in AI costs.` : "."} This can take a minute or two. You can leave this page and it keeps going.
         </p>
       ) : view.choice?.state === "failed" ? (
-        <Failed view={view} onChanged={() => void refresh.current()} />
+        <Failed view={view} onChanged={() => refresh.current()} />
       ) : view.doc && view.source_doc && view.artifact ? (
-        <Review key={view.artifact.id} view={view} onView={setView} onChanged={() => void refresh.current()} />
+        <Review key={view.artifact.id} view={view} onView={setView} onChanged={() => refresh.current()} notice={notice} setNotice={setNotice} />
       ) : (
         <NotChosen view={view} />
       )}
@@ -372,7 +392,7 @@ function ModePicker({ view, onChanged }: { view: View; onChanged: () => void }) 
         <select
           className="ax-control ax-input"
           value={mode}
-          disabled={pending !== null}
+          disabled={pending !== null || view.started}
           onChange={(e) =>
             run("mode", async () => {
               await api(path(view.job.id), "PUT", { mode: e.target.value });
@@ -380,7 +400,7 @@ function ModePicker({ view, onChanged }: { view: View; onChanged: () => void }) 
             })
           }
         >
-          <option value="off">Apply with {view.resume_name ? `"${view.resume_name}"` : "my uploaded resume"}</option>
+          <option value="off">{view.resume_name ? `Apply with "${view.resume_name}"` : "Apply"}</option>
           {view.modes.map((m) => (
             <option key={m.id} value={m.id} disabled={!m.available}>
               {`Apply with tailored resume: ${m.label}${m.available ? "" : " (coming soon)"}`}
@@ -389,33 +409,50 @@ function ModePicker({ view, onChanged }: { view: View; onChanged: () => void }) 
         </select>
       </label>
       <p className="ax-hint">
-        {note || "Your uploaded resume, unchanged."}
+        {note || (view.resume_name ? "Your uploaded resume, unchanged." : "You haven't added a resume yet.")}
         {mode !== "off" && view.estimates[mode] != null ? ` About ${cents(view.estimates[mode])} in AI costs.` : ""}
       </p>
     </div>
   );
 }
 
-function Failed({ view, onChanged }: { view: View; onChanged: () => void }) {
+const FIXES = {
+  connections: { label: "Open Connections", to: { view: "settings", tab: "connections" } },
+  applying: { label: "Open Limits", to: { view: "settings", tab: "applying" } },
+  system: { label: "Open Advanced", to: { view: "settings", tab: "system" } },
+  resumes: { label: "Open Resumes", to: { view: "resumes" } },
+  profile: { label: "Open Profile", to: { view: "profile" } },
+} as const;
+
+function Failed({ view, onChanged }: { view: View; onChanged: () => Promise<void> | void }) {
+  const { go } = useWorkspace();
   const { pending, run } = useAction();
-  const detail = view.rule_problems[0]?.message || view.choice?.error?.detail || view.choice?.error?.code || "Something went wrong.";
+  const fix = view.failure?.fix ? FIXES[view.failure.fix] : null;
   return (
     <div className="tl-failed" role="alert">
       <p>
-        <strong>The tailored resume couldn't be made.</strong> {detail} This job won't apply until you try again or switch it to plain Apply.
+        <strong>The tailored resume couldn't be made.</strong> {view.failure?.message || "Something went wrong while tailoring. Nothing was sent. Try again."} This job won't apply until you try again or switch it to plain Apply.
       </p>
-      <Button
-        variant="primary"
-        disabled={pending !== null}
-        onClick={() =>
-          run("retry", async () => {
-            await api(`${path(view.job.id)}/retry`, "POST");
-            onChanged();
-          })
-        }
-      >
-        Try again
-      </Button>
+      <span className="tl-failed-acts">
+        {fix && (
+          <Button onClick={() => go({ ...fix.to, tailor: undefined } as Parameters<typeof go>[0])}>
+            {fix.label}
+          </Button>
+        )}
+        <Button
+          variant="primary"
+          loading={pending === "retry"}
+          disabled={pending !== null}
+          onClick={() =>
+            run("retry", async () => {
+              await api(`${path(view.job.id)}/retry`, "POST");
+              await onChanged();
+            })
+          }
+        >
+          Try again
+        </Button>
+      </span>
     </div>
   );
 }
@@ -538,7 +575,7 @@ function windowOf(source: string) {
   return { low: Math.ceil(n * 0.9), high: n };
 }
 
-function BulletEdit({ bullet, source, keywords, problem, onChange }: { bullet: Bullet; source: string | undefined; keywords: Keyword[]; problem?: string; onChange: (text: string) => void }) {
+function BulletEdit({ bullet, source, keywords, problem, locked, onChange }: { bullet: Bullet; source: string | undefined; keywords: Keyword[]; problem?: string; locked?: boolean; onChange: (text: string) => void }) {
   const original = source ?? bullet.text;
   const { low, high } = windowOf(original);
   const n = bullet.text.trim().length;
@@ -546,13 +583,13 @@ function BulletEdit({ bullet, source, keywords, problem, onChange }: { bullet: B
   const off = changed && (n > high || n < low);
   return (
     <li className="tl-bullet">
-      <MarkedArea value={bullet.text} onChange={onChange} keywords={keywords} label="Bullet" invalid={off || !!problem} />
+      <MarkedArea value={bullet.text} onChange={onChange} keywords={keywords} label="Bullet" invalid={off || !!problem} readOnly={locked} />
       <div className="tl-bullet-foot">
         <span className={"tl-count" + (off ? " is-off" : "")} data-testid={`count-${bullet.id}`}>
           {n} characters
           {off ? (n > high ? `, at most ${high}` : `, at least ${low}`) : changed ? ` of ${high}` : ""}
         </span>
-        {changed && (
+        {changed && !locked && (
           <button type="button" className="ax-link" onClick={() => onChange(original)}>
             Use my original
           </button>
@@ -568,14 +605,14 @@ function BulletEdit({ bullet, source, keywords, problem, onChange }: { bullet: B
   );
 }
 
-function Review({ view, onView, onChanged }: { view: View; onView: (v: View) => void; onChanged: () => void }) {
+function Review({ view, onView, onChanged, notice, setNotice }: { view: View; onView: (v: View) => void; onChanged: () => Promise<void> | void; notice: { text: string; bad?: boolean } | null; setNotice: (n: { text: string; bad?: boolean } | null) => void }) {
   const { go } = useWorkspace();
   const [doc, setDoc] = useState<Doc>(() => structuredClone(view.doc!));
   const [removed, setRemoved] = useState<string[]>(view.removed_projects);
   const [dirty, setDirty] = useState(false);
   const [problems, setProblems] = useState<Problem[]>([]);
-  const [message, setMessage] = useState("");
   const { pending, run } = useAction();
+  const locked = view.started;
   const source = view.source_doc!;
   const sourceBullets = useMemo(() => {
     const out = new Map<string, string>();
@@ -592,7 +629,7 @@ function Review({ view, onView, onChanged }: { view: View; onView: (v: View) => 
       return next;
     });
     setDirty(true);
-    setMessage("");
+    setNotice(null);
   };
   const setBullet = (sec: number, ent: number, bul: number, text: string) =>
     change((d) => {
@@ -626,14 +663,16 @@ function Review({ view, onView, onChanged }: { view: View; onView: (v: View) => 
     } catch (e) {
       const body = e instanceof ApiError ? (e.data as { problems?: Problem[] } | undefined) : undefined;
       setProblems(body?.problems ?? []);
-      setMessage(e instanceof Error ? e.message : "That couldn't be saved.");
+      setNotice({ text: e instanceof Error ? e.message : "That couldn't be saved.", bad: true });
       return null;
     }
   };
   const saveOnly = () =>
     run("save", async () => {
       const fresh = await save();
-      if (fresh) onView(fresh);
+      if (!fresh) return;
+      setNotice({ text: fresh.approval_required ? "Saved as a new version. It needs your approval before it can be sent." : "Saved as a new version." });
+      onView(fresh);
     });
   const approve = () =>
     run("approve", async () => {
@@ -646,13 +685,16 @@ function Review({ view, onView, onChanged }: { view: View; onView: (v: View) => 
       }
       try {
         const done = await api<{ message: string }>(`${path(view.job.id)}/approve`, "POST", { artifact_id: artifact, apply: true });
-        setMessage(done.message);
-        onChanged();
+        setNotice({ text: done.message });
+        await onChanged();
       } catch (e) {
-        setMessage(e instanceof Error ? e.message : "That couldn't be approved.");
+        setNotice({ text: e instanceof Error ? e.message : "That couldn't be approved.", bad: true });
       }
     });
   const approved = view.choice?.state === "approved" && view.choice.approved_artifact_id === view.artifact!.id;
+  const blocked = !view.rules?.ok || !!view.approval_block || view.stale;
+  // Your own words that nothing else backs up stay, because it's your resume, and you're told plainly.
+  const claims = (view.rules?.warnings || []).filter((w) => w.code === "your_statement");
   const overflow = (view.pages ?? 1) > 1;
   const summary = doc.sections.findIndex((s) => s.kind === "text" && /^(professional\s+)?(summary|profile|objective)\b/i.test(s.title));
   const newSummary = summary >= 0 && !source.sections.some((s) => s.id === doc.sections[summary]!.id);
@@ -663,21 +705,43 @@ function Review({ view, onView, onChanged }: { view: View; onView: (v: View) => 
       <div className="tl-bar">
         <ScoreBar score={live.score} source={view.ats_source} keywords={live.rows} tiers={live.tiers} />
         <div className="tl-actions">
-          <Button variant="primary" disabled={pending !== null || !view.rules?.ok || !!view.approval_block || view.stale} onClick={approve}>
-            {approved && !dirty ? "Approved" : view.approval_required ? "Approve and apply" : "Save and apply"}
-          </Button>
-          {dirty && (
-            <Button disabled={pending !== null} onClick={saveOnly}>
+          {locked ? (
+            <Button variant="primary" disabled>
+              Application started
+            </Button>
+          ) : approved && !dirty ? (
+            <>
+              <Button variant="primary" disabled>
+                Approved
+              </Button>
+              {!blocked && (view.in_line ? (
+                <span className="tl-inline">In the queue</span>
+              ) : (
+                <Button loading={pending === "approve"} disabled={pending !== null} onClick={approve}>
+                  Add to the queue
+                </Button>
+              ))}
+            </>
+          ) : (
+            <Button variant="primary" loading={pending === "approve"} disabled={pending !== null || blocked} onClick={approve}>
+              {view.approval_required ? "Approve and apply" : "Save and apply"}
+            </Button>
+          )}
+          {dirty && !locked && (
+            <Button loading={pending === "save"} disabled={pending !== null} onClick={saveOnly}>
               Save edits
             </Button>
           )}
           <Button
             icon={<RotateCcw size={14} aria-hidden="true" />}
-            disabled={pending !== null}
+            loading={pending === "again"}
+            disabled={pending !== null || locked}
+            title={dirty ? "This replaces your unsaved edits with a new version." : undefined}
             onClick={() =>
               run("again", async () => {
                 await api(`${path(view.job.id)}/retry`, "POST");
-                onChanged();
+                setNotice(null);
+                await onChanged();
               })
             }
           >
@@ -686,24 +750,28 @@ function Review({ view, onView, onChanged }: { view: View; onView: (v: View) => 
         </div>
       </div>
       <p className="tl-disclaimer">{view.ats.disclaimer}</p>
-      {view.approval_block && <p className="ax-note" role="status">{view.approval_block.message}</p>}
+      {locked && <p className="ax-note" role="status">This application has already started, so its resume can't change now. The PDF below is the one it uses.</p>}
+      {view.approval_block && !locked && <p className="ax-note" role="status">{view.approval_block.message}</p>}
+      {claims.map((w) => (
+        <p key={w.code} className="tl-claim" role="status">{w.message}</p>
+      ))}
       {view.report.workspace_id && <>
         {dirty && <p className="ax-note">Save your resume edits before changing projects.</p>}
         <AggressiveDrafts workspaceId={view.report.workspace_id} jobId={view.job.id} needsUpdate={view.project_changes_pending}
           disabled={dirty || pending !== null || ["queued", "running", "submitting", "waiting_browser", "confirmed", "submission_unknown", "already_applied"].includes(view.job.status)} onChanged={onChanged} />
       </>}
-      {message && (
-        <p className={problems.length ? "ax-error tl-message" : "tl-message"} role="status">
-          {message}
+      {notice && (
+        <p className={notice.bad ? "ax-error tl-message" : "tl-message"} role="status">
+          {notice.text}
         </p>
       )}
       {approved && !dirty && (
         <p className="tl-approved">
-          {view.choice?.approved_how === "setting_off" ? "Approval is off in Settings, so this version goes out as it is." : "You approved this version."} The PDF below is exactly what's sent.{" "}
-          <a href={routeUrl({ view: "settings", tab: "applying" })} className="ax-link" onClick={(e) => { e.preventDefault(); go({ view: "settings", tab: "applying" }); }}>Settings</a>
+          {view.choice?.approved_how === "setting_off" ? "Approval is off in Settings, so this version goes out as it is." : "You approved this version."} The PDF under "The PDF that's sent" is exactly what goes out.{" "}
+          <a href={routeUrl({ view: "settings", tab: "applying" })} className="ax-link" onClick={(e) => { e.preventDefault(); go({ view: "settings", tab: "applying", tailor: undefined } as Parameters<typeof go>[0]); }}>Change this in Settings</a>
         </p>
       )}
-      {view.stale && <p className="ax-error tl-message" role="alert">Your profile or this posting changed after this was tailored, so it won't be sent. Tailor it again.</p>}
+      {view.stale && !locked && <p className="ax-error tl-message" role="alert">Your resume, your profile or this posting changed after this was tailored, so it won't be sent. Tailor it again.</p>}
       {overflow && (
         <p className="ax-error tl-message" role="alert">
           This resume runs to {view.pages} pages at the set type sizes, even with tight spacing. Nothing was dropped to fit. Shorten something if you want one page.
@@ -726,7 +794,7 @@ function Review({ view, onView, onChanged }: { view: View; onView: (v: View) => 
                     {isSummary && newSummary && <Pill>New</Pill>}
                   </h3>
                   {editable ? (
-                    <MarkedArea value={s.text} keywords={onResume} label={s.title} invalid={!!problemAt(s.id)} onChange={(t) => setText(si, t)} />
+                    <MarkedArea value={s.text} keywords={onResume} label={s.title} invalid={!!problemAt(s.id)} readOnly={locked} onChange={(t) => setText(si, t)} />
                   ) : (
                     <p className="tl-fixed"><Marked text={s.text} keywords={onResume} /></p>
                   )}
@@ -753,7 +821,7 @@ function Review({ view, onView, onChanged }: { view: View; onView: (v: View) => 
                       {problemAt(e.id) && <p className="ax-error">{problemAt(e.id)}</p>}
                       {s.kind === "projects" && removable && (
                         <label className="ax-check tl-keep">
-                          <input type="checkbox" checked={e.include} onChange={(x) => toggleProject(si, ei, e.id, x.target.checked)} />
+                          <input type="checkbox" checked={e.include} disabled={locked} onChange={(x) => toggleProject(si, ei, e.id, x.target.checked)} />
                           <span>Keep on this resume</span>
                         </label>
                       )}
@@ -761,7 +829,7 @@ function Review({ view, onView, onChanged }: { view: View; onView: (v: View) => 
                         <ul className="tl-bullets">
                           {e.bullets.map((b, bi) =>
                             b.include ? (
-                              generated ? <li key={b.id} className="tl-fixed"><Marked text={b.text} keywords={onResume} /></li> : <BulletEdit key={b.id} bullet={b} source={sourceBullets.get(b.id)} keywords={onResume} problem={problemAt(b.id)} onChange={(t) => setBullet(si, ei, bi, t)} />
+                              generated ? <li key={b.id} className="tl-fixed"><Marked text={b.text} keywords={onResume} /></li> : <BulletEdit key={b.id} bullet={b} source={sourceBullets.get(b.id)} keywords={onResume} problem={problemAt(b.id)} locked={locked} onChange={(t) => setBullet(si, ei, bi, t)} />
                             ) : null,
                           )}
                         </ul>
@@ -774,7 +842,7 @@ function Review({ view, onView, onChanged }: { view: View; onView: (v: View) => 
           })}
         </div>
         <aside className="tl-col tl-side">
-          <KeywordLists rows={live.rows} onAdd={addSkill} />
+          <KeywordLists rows={live.rows} onAdd={locked ? undefined : addSkill} />
           <Posting text={view.job.description} rows={live.rows} />
           {!view.report.workspace_id && view.drafts.some((d) => !d.confirmed) && (
             <section className="tl-drafts">
@@ -801,6 +869,7 @@ function Review({ view, onView, onChanged }: { view: View; onView: (v: View) => 
 
 function Checks({ view, sized }: { view: View; sized?: Record<string, number[]> }) {
   const rules = view.preview_rules || view.rules;
+  const warnings = [...(rules?.warnings || []), ...(view.rules?.warnings || [])].filter((w, i, all) => w.code !== "overflow" && all.findIndex((x) => x.code === w.code && x.where === w.where) === i);
   const type = sized && `Name ${sized.name?.[0] ?? "?"} pt, headings ${sized.section?.[0] ?? "?"}, sub-headings ${sized.sub?.[0] ?? "?"}, bullets ${sized.bullet?.[0] ?? "?"}, read from the PDF`;
   return (
     <section className="tl-checks" aria-label="Checks">
@@ -816,7 +885,7 @@ function Checks({ view, sized }: { view: View; sized?: Record<string, number[]> 
             {i.detail ? `: ${i.detail}` : ""}
           </li>
         ))}
-        {(rules?.warnings || []).filter((w) => w.code !== "overflow").map((w) => (
+        {warnings.map((w) => (
           <li key={w.where + w.code} className="is-warn">{w.message}</li>
         ))}
       </ul>

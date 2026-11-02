@@ -163,7 +163,8 @@ def listing() -> list[dict]:
     _load()
     rows = [{"id": s.id, "label": s.label, "note": s.note, "available": True} for s in _REGISTRY.values()]
     rows += [{"id": k, **v, "available": False} for k, v in PLANNED.items() if k not in _REGISTRY]
-    return rows
+    # The plain mode comes first, whichever module loaded first.
+    return sorted(rows, key=lambda row: row["id"] != "normal")
 
 
 def policy_for(mode: str) -> str:

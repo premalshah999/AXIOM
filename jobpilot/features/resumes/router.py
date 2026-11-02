@@ -11,9 +11,9 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 from sqlalchemy import func, select
 
-from . import editor, evidence, pipeline
+from . import choice, editor, evidence, pipeline
 from . import master as master_mod
-from .tables import RsArtifact
+from .tables import RsArtifact, RsTailorChoice
 
 _TASKS: set = set()
 
@@ -64,7 +64,14 @@ def router(service) -> APIRouter:
         ):
             if artifact_id and (artifact_id not in sent or state == "confirmed"):
                 sent[artifact_id] = {"state": "confirmed" if state == "confirmed" else "unknown", "at": at}
-        return {x.id: {"job": jobs.get(x.job_id), "sent": sent.get(x.id)} for x in rows}
+        # A job's own choice of a tailored resume, whichever the account's policy says: this version goes out for that job once it's approved.
+        chosen = {c.job_id: c for c in s.scalars(select(RsTailorChoice).where(RsTailorChoice.job_id.in_(job_ids)))}
+
+        def in_use(x):
+            row = chosen.get(x.job_id)
+            return {"mode": row.mode, "state": row.state} if row and row.artifact_id == x.id else None
+
+        return {x.id: {"job": jobs.get(x.job_id), "sent": sent.get(x.id), "choice": in_use(x)} for x in rows}
 
     @r.get("/artifacts")
     def artifacts(
@@ -89,7 +96,8 @@ def router(service) -> APIRouter:
             items = [
                 {
                     **{k: v for k, v in pipeline.record(x).model_dump().items() if k not in {"text", "pdf_path"}},
-                    **facts.get(x.id, {"job": None, "sent": None}),
+                    **facts.get(x.id, {"job": None, "sent": None, "choice": None}),
+                    "failure": choice.plain_failure(x.error)["message"] if x.status == "failed" else None,
                 }
                 for x in rows
             ]
@@ -291,6 +299,7 @@ def router(service) -> APIRouter:
         with open(path, "wb") as f:
             f.write(result.pdf)
         os.chmod(path, 0o600)
+        pdf_sha = sha256_bytes(result.pdf)
         validation = {k: v for k, v in check.items() if k != "text"}
         derived_policy = editor.EDITOR_VERSION
         if data.base_artifact_id:
@@ -332,7 +341,7 @@ def router(service) -> APIRouter:
                     employer_id=employer_id,
                     description_sha=dsha,
                     policy_version=derived_policy,
-                    pdf_sha=sha256_bytes(result.pdf),
+                    pdf_sha=pdf_sha,
                     pdf_path=rel,
                     text=check["text"][:20000],
                     selection=editor.selection_of(doc) if doc and data.latex is None else [],
@@ -340,11 +349,17 @@ def router(service) -> APIRouter:
                     finished_at=now(),
                 )
             )
+            s.flush()
+            tailored = None
+            chosen = s.get(RsTailorChoice, data.job_id) if data.job_id else None
+            if chosen is not None and data.base_artifact_id and chosen.artifact_id == data.base_artifact_id:
+                tailored = choice.adopt(s, data.job_id, artifact_id, pdf_sha, (validation.get("rules") or {}).get("ok") is True)
         return {
             "artifact_id": artifact_id,
             "pages": check["pages"],
             "problems": check["problems"],
             "warnings": check["warnings"],
+            "choice": tailored,
         }
 
     # ---------- master resume ----------
@@ -398,8 +413,8 @@ def router(service) -> APIRouter:
 
     @r.post("/master/import")
     async def master_import():
-        if not getattr(config, "llm_api_key", ""):
-            raise HTTPException(409, "Importing needs a configured language model")
+        if not pipeline.answers_key(db, config):
+            raise HTTPException(409, "Importing needs your AI key. Add it in Settings, under Connections.")
         from ..knowledge.writing import configured_model
 
         try:

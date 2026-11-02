@@ -44,7 +44,7 @@ async def preview(db, workspace_id, *, compile_fn=compile_pdf):
         removed_projects=workspace["removed_projects"],
     )
     if not rules["ok"] or not parsed["ok"]:
-        raise ValueError("This preview failed the shared resume rules or ATS parse check")
+        raise ValueError("This preview didn't pass the resume checks. Update the project PDF, or tailor this job again.")
     return {
         "pdf": compiled.pdf,
         "latex": render(doc, fitted["style"]),
