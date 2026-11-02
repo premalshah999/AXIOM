@@ -488,6 +488,8 @@ export type RuntimeHealth = {
     provider: AgentModelProvider;
     model: string;
     state: "ready" | "cooldown" | "recovery_ready" | "recovering";
+    /** "ready" only says nothing is holding it back: without a key it still cannot answer. */
+    has_key?: boolean;
     retry_at: string | null;
     last_error: string | null;
   }>>;

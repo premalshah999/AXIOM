@@ -9,6 +9,8 @@ falls back to .env again. Secrets are never returned to the browser: only whethe
 
 import json
 import os
+import re
+from zoneinfo import ZoneInfo
 
 import httpx
 from cryptography.fernet import Fernet, InvalidToken
@@ -50,7 +52,7 @@ FIELDS = {
                       "Used to sign up and sign in on career sites. Empty: the email in your profile."),
     "application_password": ("Accounts", "Main password", True,
                              "Optional. One password AXIOM tries first when it creates or resets an employer account. A site that "
-                             "refuses it gets a random one that meets its rules, kept for that employer in Settings › Accounts. "
+                             "refuses it gets a random one that meets its rules, kept for that employer in Settings › Employer accounts. "
                              "Using one password on many sites is your choice, and a risk: if one employer leaks it, the others "
                              "can be tried with it."),
     "telegram_enabled": ("Telegram", "Telegram messages", False, "Send questions and alerts to Telegram."),
@@ -85,6 +87,7 @@ OPTION_LABELS = {
     "wafer": "Wafer · $0.07 / $0.50",
 }
 PROVIDERS = ("deepseek", "haiku", "mimo", "openai", "openrouter")
+EMAIL = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
 
 
 def _cipher(config):
@@ -122,6 +125,16 @@ def kind(name):
     return "bool" if annotation is bool else "number" if annotation in (int, float) else "text"
 
 
+def valid_zone(value):
+    """Whether this names a time zone. Every "today" reads it, and the dashboard's one poll first of all: a typo saved here left
+    the whole app on an error, with no way back to this setting (2026-11-01)."""
+    try:
+        ZoneInfo(str(value))
+    except Exception:  # Not found, a folder name ("America"), or not a key at all (ValueError).
+        return False
+    return bool(value)
+
+
 def typed(name, value):
     """A saved string as the setting's own type, within its limits (ValueError when it is not one)."""
     if name == "llm_provider" or kind(name) in {"secret", "text"}:
@@ -131,7 +144,7 @@ def typed(name, value):
     except Exception as exc:
         # The last line of a validation error is a link to its documentation, which is what the person used to read.
         first = (exc.errors() or [{}])[0] if hasattr(exc, "errors") else {}
-        bound = first.get("ctx") or {}
+        bound = {k: int(v) if float(v).is_integer() else v for k, v in (first.get("ctx") or {}).items() if isinstance(v, (int, float))}
         why = (
             f"must be {bound['le']} or less" if "le" in bound
             else f"must be {bound['ge']} or more" if "ge" in bound
@@ -169,6 +182,9 @@ def apply(config, live=False):
             value = typed(name, value) if value != "" or kind(name) in {"secret", "text"} else getattr(config, name)
         except ValueError:
             value = typed(name, env[name]) if env.get(name) not in (None, "") else getattr(config, name)
+        if name == "timezone" and not valid_zone(value):
+            # Saved by a build that did not check, or a typo in .env: the environment's if it is one, otherwise UTC.
+            value = env[name] if valid_zone(env.get(name)) else "UTC"
         object.__setattr__(config, name, value)
     return config
 
@@ -188,6 +204,12 @@ def save(config, updates):
             raise ValueError(f"{FIELDS[name][1]}: choose {' or '.join(OPTIONS[name])}")
         if value:
             typed(name, value)  # Refuses a value outside the setting's type or limits before it is saved.
+        if name == "timezone" and value and not valid_zone(value):
+            raise ValueError(f"Time zone: {value} isn't one. Use a name like America/New_York or Europe/London.")
+        if name == "account_email" and value and not EMAIL.fullmatch(value):
+            raise ValueError("Email for employer accounts: enter an address like name@example.com.")
+        if name == "vision_base_url" and value and not value.startswith(("http://", "https://")):
+            raise ValueError("Screenshot model address: it starts with https://, like https://openrouter.ai/api/v1.")
         if name == "application_password" and value:
             from .config import password_problems
 
@@ -213,6 +235,10 @@ def status(config):
     env = _ENV.get(id(config), {})
     fields = []
     for name, (group, label, secret, help_text) in FIELDS.items():
+        if name == "headless" and getattr(config, "browser_cdp_url", ""):
+            # It only reaches the throwaway Chrome used when no worker Chrome is attached. The Mac app always attaches one, which
+            # shows a window whatever this says: a switch that read "on" while the browser stayed on screen.
+            continue
         current = getattr(config, name, "")
         value = ("true" if current else "false") if kind(name) == "bool" else str(current if current is not None else "")
         source = "app" if name in saved else "env" if env.get(name) else ""
@@ -242,7 +268,29 @@ SERVICE_NAMES = {
     "telegram_bot_token": "Telegram",
     "vision_api_key": "The screenshot model",
     "serper_api_key": "Serper",
+    "twocaptcha_api_key": "2Captcha",
+    "typesafe_api_key": "TypeSafe",
 }
+
+
+async def _test_telegram(client, config, key):
+    """The token, and then the step that silently breaks it: a bot may not message anyone who never pressed Start. A typing signal
+    shows up nowhere lasting and fails exactly as a message would."""
+    base = f"https://api.telegram.org/bot{key}"
+    response = await client.get(base + "/getMe")
+    if response.status_code in {401, 404}:  # 404 is Telegram's answer to something not shaped like a token.
+        return {"ok": False, "message": "Telegram didn't accept this token. Copy it again from @BotFather, all of it."}
+    if response.status_code != 200:
+        return {"ok": False, "message": f"Telegram isn't answering properly right now (error {response.status_code}). Try again in a minute."}
+    user = str(getattr(config, "telegram_user_id", "") or "")
+    if not user:
+        return {"ok": False, "message": "The token works. Add your Telegram user ID, or the bot has no one to message."}
+    reach = await client.post(base + "/sendChatAction", json={"chat_id": user, "action": "typing"})
+    if reach.status_code == 200:
+        return {"ok": True, "message": "Connected. The bot can message you."}
+    if reach.status_code in {400, 403}:
+        return {"ok": False, "message": "The token works, but the bot can't message you yet. Open your bot in Telegram, press Start, and check your user ID."}
+    return {"ok": False, "message": f"Telegram isn't answering properly right now (error {reach.status_code}). Try again in a minute."}
 
 
 async def test(config, name):
@@ -266,7 +314,7 @@ async def test(config, name):
                     base + "/v1/models", headers={"x-api-key": key, "anthropic-version": "2023-06-01"}
                 )
             elif name == "telegram_bot_token":
-                response = await client.get(f"https://api.telegram.org/bot{key}/getMe")
+                return await _test_telegram(client, config, key)
             elif name == "twocaptcha_api_key":
                 response = await client.get("https://2captcha.com/res.php",
                                             params={"key": key, "action": "getbalance", "json": 1})
@@ -287,10 +335,22 @@ async def test(config, name):
             elif name == "serper_api_key":
                 response = await client.post("https://google.serper.dev/search", headers={"X-API-KEY": key},
                                              json={"q": "software engineer jobs", "num": 1})
+            elif name == "typesafe_api_key":
+                # One tiny question, a fraction of a cent. This used to answer "Saved." with a green Works for any text at all.
+                from .jev import choice_question
+
+                base = getattr(config, "typesafe_base_url").rstrip("/")
+                response = await client.post(
+                    base + "/v1/systemone", headers={"Authorization": f"Bearer {key}"},
+                    json={"model": getattr(config, "jev_model"), "state": "The sky is blue.",
+                          "questions": {"check": choice_question("What color is the sky?", ["Blue", "Green"])}},
+                )
             else:
                 return {"ok": True, "message": "Saved."}
-    except httpx.HTTPError as exc:
+    except (httpx.HTTPError, httpx.InvalidURL):
         return {"ok": False, "message": f"Couldn't reach {service}. Check your internet connection and try again."}
+    except ValueError:  # A page where a JSON answer belonged.
+        return {"ok": False, "message": f"{service} isn't answering properly right now. Try again in a minute."}
     if response.status_code == 200 and name == "openrouter_api_key":
         # /key answers 200 for a key whose account has nothing left to spend, and the first application then fails at its first
         # model question. Said now, in words, where it can be fixed (a friend's first run: out of credit looked like "no jobs").

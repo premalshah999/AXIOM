@@ -66,7 +66,9 @@ def test_settings_roundtrip_and_secret_free(client, service):
     assert not response.json()["enabled"]["captcha"]
     assert "private-fixture-key" not in response.text
     assert for_role(service.db, service.config, "answers").llm_provider == "haiku"
-    assert service.config.llm_provider == "mimo"
+    assert for_role(service.db, service.config, "navigator").llm_provider == "mimo"  # Each role its own: a copy per call.
+    # The model for answers is the main model: ranking and the checks before a run read its key from here.
+    assert service.config.llm_provider == "haiku"
 
 
 def test_unconfigured_and_unrecognized_provider_rejected(client, service):
@@ -105,7 +107,7 @@ async def test_disabled_helpers_do_not_call_provider_mail_or_discovery(service, 
         ),
     )
     assert not await solver.solve(SimpleNamespace(frames=[frame]))
-    assert "disabled" in solver.last_reason
+    assert "turned off" in solver.last_reason
     other = CaptchaSolver(service.config, lambda *args: None, service.db)
     assert not await other.solve(SimpleNamespace(frames=[]))
     assert not other.challenge_unverified

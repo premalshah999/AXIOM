@@ -31,6 +31,8 @@ export type AccountStatus = {
 };
 
 const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+// desktop/AXIOM.m gives its window this handler, and signs that window in with the access token whatever is set here.
+const IN_MAC_WINDOW = !!(window as unknown as { webkit?: { messageHandlers?: { axiom?: unknown } } }).webkit?.messageHandlers?.axiom;
 // The server's policy (owner_account.password_problem), checked while the owner types.
 const RULES: { label: string; test: (p: string) => boolean }[] = [
   { label: "At least 10 characters", test: (p) => p.length >= 10 },
@@ -1148,7 +1150,11 @@ function AddSignIn({ onAdded }: { onAdded: () => void }) {
         if (created) setCodes(created.recovery_codes);
       }}
     >
-      <p className="ax-hint">Anyone who can open AXIOM on this computer can use it. Add an email and password to require signing in.</p>
+      <p className="ax-hint">
+        {IN_MAC_WINDOW
+          ? "This window signs itself in, so anyone who can open AXIOM on this Mac can use it. An email and password are only for opening AXIOM in a web browser."
+          : "Anyone who can open AXIOM on this computer can use it. Add an email and password to require signing in."}
+      </p>
       <FormGrid>
         <Field label="Full name" error={errors.name}>
           <input

@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { api } from "./api";
 import { useWorkspace } from "./context";
-import { useAction, useNow, usePoll } from "./hooks";
+import { useAction, useNotify, useNow, usePoll } from "./hooks";
 import { ConsentWords } from "./permissions";
 import { DayChart, DotPatterns } from "./identity/DayChart";
 import { LiveWork, type LiveRow } from "./identity/LiveWork";
@@ -24,6 +24,8 @@ import { pressResume, pressStop } from "./shell/StopControl";
 import "./styles/work.css";
 
 const LIVE_MAIL = new Set(["pending", "matched", "consumed"]);
+// The server's limit on Applications per day (config.py, daily_application_limit).
+const MAX_DAILY_LIMIT = 1000;
 
 type Working = {
   key: string;
@@ -151,6 +153,7 @@ type WorkingState = ReturnType<typeof useWorking>;
 function Hero({ work, applications, models }: { work: WorkingState; applications: Success[] | null; models?: RuntimeHealth["models"] }) {
   const { snapshot, counts, link, refresh, go, version } = useWorkspace();
   const { pending, run } = useAction();
+  const notify = useNotify();
   const now = useNow();
   const today = useMemo(() => confirmedToday(applications || [], now), [applications, now]);
 
@@ -166,9 +169,12 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
   const goal = typed ?? limit;
   const setGoal = (value: number) => setTyped(value);
   const saveLimit = (raw: number) => {
-    const value = Math.max(1, Math.min(1000, Math.round(raw || limit)));
+    // Empty, zero or below: the field goes back to what is saved. Above the most: it says so.
+    const value = raw >= 1 ? Math.min(MAX_DAILY_LIMIT, Math.round(raw)) : limit;
     if (value === limit) {
       setTyped(null);
+      if (raw > MAX_DAILY_LIMIT) notify("error", `${MAX_DAILY_LIMIT} a day is the most AXIOM allows.`);
+      else if (!(raw >= 1)) notify("error", `Applications per day is a number from 1 to ${MAX_DAILY_LIMIT}. It stays at ${limit}.`);
       return Promise.resolve();
     }
     return run(
@@ -178,7 +184,9 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
         await refresh();
         setTyped(null);
       },
-      `Applications per day: ${value}. Settings shows the same number.`,
+      raw > MAX_DAILY_LIMIT
+        ? `Applications per day: ${value}, the most AXIOM allows. Settings shows the same number.`
+        : `Applications per day: ${value}. Settings shows the same number.`,
     );
   };
   const workers = snapshot.config.workers_enabled;
@@ -272,7 +280,7 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
       className="ov-key"
       onSubmit={(e) => {
         e.preventDefault();
-        const value = Math.max(1, Math.min(1000, Math.round(goal || limit)));
+        const value = Math.max(1, Math.min(MAX_DAILY_LIMIT, Math.round(goal || limit)));
         // A batch sends on its own, which turns "Let me review first" off. Said before it happens, not found out afterwards.
         if (!snapshot.control.auto_submit || reviewing || !permitted) setConfirmStart(value);
         else begin(value);

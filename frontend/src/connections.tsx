@@ -9,7 +9,7 @@ import { mailHealth } from "./mail";
 import { RestartNotice, SaveBar, SecretInput, SwitchRow } from "./setup-kit";
 import type { MailStatus } from "./types";
 import "./styles/settings.css";
-import { Button, Check, Empty, Input, Monogram, Pill, Select } from "./ui/index";
+import { Button, Check, ConfirmButton, Empty, Input, Monogram, Pill, Select } from "./ui/index";
 
 type ConnectionField = {
   name: string;
@@ -103,13 +103,29 @@ export function useConnections() {
       run(
         "save",
         async () => {
-          await api<Connections>("/connections", "PUT", { values: draft });
-          setDraft({});
+          const sent = draft;
+          await api<Connections>("/connections", "PUT", { values: sent });
+          // What was typed while this save was on its way is still a change.
+          setDraft((d) => Object.fromEntries(Object.entries(d).filter(([k, v]) => sent[k] !== v)));
+          // A "Works" from before this save may be about a key that is gone.
+          setResults({});
           setEpoch((e) => e + 1);
           await state.refresh();
           await refreshWorkspace(); // the dashboard reads the daily limit from the workspace snapshot
         },
         restartNeeded ? "Saved. Worker settings apply after the app restarts." : "Settings saved.",
+      ),
+    /** Take a saved value away now: a blank value removes it on the server. Typing a new one is Replace. */
+    remove: (name: string) =>
+      run(
+        `remove:${name}`,
+        async () => {
+          await api<Connections>("/connections", "PUT", { values: { [name]: "" } });
+          setResults((r) => Object.fromEntries(Object.entries(r).filter(([k]) => k !== name)));
+          await state.refresh();
+          await refreshWorkspace();
+        },
+        "Removed.",
       ),
     test: (name: string) =>
       run(`test:${name}`, async () => {
@@ -205,7 +221,7 @@ function SecretField({ c, name, lead, label }: { c: Conn; name: string; lead?: R
       ) : f.set ? (
         <div className="st-key" aria-label={`${f.label}, saved`}>
           <span>{f.value}</span>
-          <small>{f.source === "env" ? "From the server" : "Saved in AXIOM"}</small>
+          <small>{f.source === "env" ? "From the .env file" : "Saved in AXIOM"}</small>
         </div>
       ) : (
         <div className="st-key is-empty">No key saved</div>
@@ -221,6 +237,16 @@ function SecretField({ c, name, lead, label }: { c: Conn; name: string; lead?: R
           <Button size="sm" variant={f.set ? "ghost" : "secondary"} onClick={() => setEditing(true)}>
             {f.set ? "Replace key" : "Add key"}
           </Button>
+        )}
+        {!open && f.set && f.source === "app" && (
+          <ConfirmButton
+            label="Remove"
+            confirm="Remove"
+            size="sm"
+            variant="secondary"
+            pending={c.pending === `remove:${name}`}
+            onConfirm={() => c.remove(name)}
+          />
         )}
         {result && !open && (
           <span className={"st-result" + (result.ok ? "" : " is-bad")} role="status">
@@ -470,7 +496,13 @@ function ServiceCard({ c, s }: { c: Conn; s: Service }) {
   const f = c.by(s.key);
   if (!f) return null;
   const on = s.toggle ? c.value(s.toggle.name) === "true" : true;
-  const state = f.set ? (
+  // A bot with no one to message reads "On" otherwise, and nothing ever arrives.
+  const noOne = s.id === "telegram" && f.set && !c.value("telegram_user_id");
+  const state = noOne ? (
+    <Pill tone="warn" dot>
+      Needs your user ID
+    </Pill>
+  ) : f.set ? (
     <Pill tone={on ? "ok" : "neutral"} dot>
       {on ? "On" : "Off"}
     </Pill>
@@ -582,8 +614,8 @@ export function ConnectionSettings() {
           ...OPENROUTER,
           ...SERVICES.flatMap((s) => [s.key, ...(s.fields ?? []), ...(s.more ?? []), ...(s.toggle ? [s.toggle.name] : [])]),
         ]);
-        // Limits and workers are edited under Applying and Advanced; anything else the server adds still gets a field here.
-        const rest = c.fields.filter((f) => !claimed.has(f.name) && f.group !== "Limits" && f.group !== "Workers");
+        // Limits, workers and logos are edited under Applying and Advanced; anything else the server adds still gets a field here.
+        const rest = c.fields.filter((f) => !claimed.has(f.name) && f.group !== "Limits" && f.group !== "Workers" && f.group !== "Appearance");
         const current = c.draft.llm_provider ?? data.provider;
         return (
           <>

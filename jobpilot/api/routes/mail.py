@@ -114,7 +114,7 @@ def router(service) -> APIRouter:
                 # A mailbox connected in the app has its own password: this button said "Set GMAIL_ADDRESS in .env" to all of them.
                 box = service.inbox.mailbox()
                 if not box:
-                    raise ValueError("Connect your Gmail in Settings > Connections first")
+                    raise ValueError("Connect your Gmail in Settings > Mailbox first")
                 await mail.request(box, "/profile")
                 return {"connected": True, "folder": "INBOX", "host": "imap.gmail.com"}
             await asyncio.to_thread(

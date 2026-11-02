@@ -7,7 +7,7 @@ import { SecretInput } from "./setup-kit";
 import { Button } from "./ui/index";
 import "./styles/mainpassword.css";
 
-export function MainPassword({ compact = false }: { compact?: boolean }) {
+export function MainPassword({ compact = false, onChange }: { compact?: boolean; onChange?: () => unknown }) {
   const id = useId();
   const notify = useNotify();
   const [isSet, setIsSet] = useState<boolean | null>(null);
@@ -33,6 +33,7 @@ export function MainPassword({ compact = false }: { compact?: boolean }) {
       setEditing(false);
       setValue("");
       notify("ok", next ? "Main password saved." : "Main password removed.");
+      void onChange?.();
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -47,7 +48,7 @@ export function MainPassword({ compact = false }: { compact?: boolean }) {
       </label>
       <p className="ax-hint">
         AXIOM tries this first when it creates or resets an employer account. A site that refuses it gets a random password that
-        meets its rules, kept for that site in Settings › Accounts, where you can see and copy it.
+        meets its rules, kept for that site in Settings › Employer accounts, where you can see and copy it.
         {compact ? "" : " Left empty, AXIOM makes one strong password itself."}
       </p>
       <p className="ax-hint">

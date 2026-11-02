@@ -187,6 +187,7 @@ def status(db, config):
         "provider": config.llm_provider,
         "model": config.llm_model,
         "state": state,
+        "has_key": bool(config.llm_api_key),
         "retry_at": datetime.fromtimestamp(retry, UTC).isoformat() if retry else None,
         "last_error": value.get("last_error"),
     }
