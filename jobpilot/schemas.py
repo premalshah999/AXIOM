@@ -293,6 +293,11 @@ class KnowledgeInput(BaseModel):
     employer: str = Field(default="", max_length=300)
 
 
+class ExtractedProject(BaseModel):
+    name: str = ""
+    description: str = ""
+
+
 class ProfileExtract(BaseModel):
     """Structured details the model extracts from an existing resume (never invented)."""
 
@@ -307,3 +312,4 @@ class ProfileExtract(BaseModel):
     work: list[WorkEntry] = Field(default_factory=list)
     education: list[EducationEntry] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)
+    projects: list[ExtractedProject] = Field(default_factory=list)

@@ -406,6 +406,8 @@ def router(service) -> APIRouter:
             return await master_mod.import_master(db, config, configured_model(db, config))
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from None
+        except Exception as exc:  # Cut off or refused by the provider: words a person can act on, not the library's.
+            raise HTTPException(409, master_mod.unread_words(exc)) from None
 
     @r.put("/master")
     async def master_save(data: MasterSave):

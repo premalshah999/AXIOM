@@ -147,35 +147,47 @@ def model_drafter(db, config) -> Drafter | None:
     return draft
 
 
-async def source_document(db, config, model, resume: dict, profile: dict) -> tuple | None:
+class ResumeUnread(Exception):
+    """AXIOM has no faithful copy of this resume to tailor from. The words a person reads, because nothing else takes its place."""
+
+    def __init__(self, detail: str, retryable: bool = True):
+        super().__init__(detail)
+        self.detail, self.retryable = detail, retryable
+
+
+# Where a person goes from a copy that differs. It stands behind every other sentence here.
+CHECK_THE_COPY = "Open Resumes to compare the copy with your original and approve it, or use plain Apply, which sends your PDF as it is."
+
+
+async def source_document(db, config, model, resume: dict, *, fresh: bool = False) -> tuple:
     """(doc, style, origin): what a tailored resume starts from. The approved master; else a draft or fresh import that matches the
-    uploaded PDF word for word, so a new user needn't approve a master first; else the history in their profile. All of it is their own."""
-    from .editor import Style, from_inventory
-    from .master import current_master, import_master, master_doc
+    uploaded PDF word for word, so a new user needn't approve a master first. Nothing else: a resume rebuilt from the profile, used here
+    until 2026-11-01, has one long bullet per job and no projects, and nobody was told it wasn't theirs. So this says why it stopped.
+    fresh: the person asked to try again, so read a copy that differs once more. Otherwise the same PDF isn't paid for twice."""
+    from .editor import ResumeDoc, Style
+    from .master import ResumeTooLong, current_master, different_words, import_master, master_doc, unread_words
 
     approved = master_doc(db)
     if approved:
         return approved[0], approved[1], "master"
-    from .editor import ResumeDoc
-
-    def verified(row):
-        return (row.verification or {}).get("faithful") and (row.verification or {}).get("render_fill", {}).get("pages", 1) <= 1
-
     draft = current_master(db)
-    if draft is not None and verified(draft) and draft.source_resume_sha == resume["sha"]:
-        return ResumeDoc.model_validate(draft.doc), Style.model_validate(draft.style), "import"
-    if model is not None:
-        try:
-            imported = await import_master(db, config, model, resume["id"])
-        except Exception as exc:  # A transcription that fails or is cut off isn't the end: the profile holds the same history.
-            log.info("master import failed: %s", type(exc).__name__)
-            imported = None
-        if imported and (imported.get("verification") or {}).get("faithful"):
-            return ResumeDoc.model_validate(imported["doc"]), Style.model_validate(imported["style"]), "import"
-    doc = from_inventory(evidence.build(profile, resume["text"]))
-    if not any(s.entries or s.text.strip() for s in doc.sections):
-        return None
-    return doc, Style(), "profile"
+    if draft is not None and draft.source_resume_sha == resume["sha"]:
+        if (draft.verification or {}).get("faithful"):
+            return ResumeDoc.model_validate(draft.doc), Style.model_validate(draft.style), "import"
+        # A copy the person edited is theirs to approve: another reading would bury it.
+        if not fresh or draft.origin == "edited":
+            raise ResumeUnread(f"{different_words(draft.verification or {})} {CHECK_THE_COPY}")
+    try:
+        imported = await import_master(db, config, model, resume["id"])
+    except ResumeTooLong as exc:
+        raise ResumeUnread(str(exc), retryable=False) from None
+    except Exception as exc:
+        log.info("master import failed: %s", type(exc).__name__)
+        raise ResumeUnread(f"{unread_words(exc)} Your resume wasn't copied, so nothing was tailored. Plain Apply still sends your PDF as it is.") from None
+    verification = imported.get("verification") or {}
+    if not verification.get("faithful"):
+        raise ResumeUnread(f"{different_words(verification)} {CHECK_THE_COPY}")
+    return ResumeDoc.model_validate(imported["doc"]), Style.model_validate(imported["style"]), "import"
 
 
 async def _build_mode(db, config, job, resume, profile, source_tuple, spec, model, compile_fn) -> dict:
@@ -300,7 +312,7 @@ async def prepare_resume(
     """One job's tailored resume, in one mode.
 
     mode None is the account-wide "tailored" policy: it runs Normal and only from an approved master, else use_master. A mode the applicant chose
-    for this job starts from whatever source_document finds, and it fails plainly rather than sending something else. fresh: build anew.
+    for this job starts from what source_document finds, and it fails plainly rather than sending something else. fresh: build anew.
     status: ready (a tailored PDF), use_master, building, failed.
     """
     from ...db import Job, Resume
@@ -367,14 +379,11 @@ async def prepare_resume(
     meter: list = []
     meter_token = COST_METER.set(meter)
     try:
-        source_tuple = await source_document(db, config, model, resume, profile)
+        source_tuple = await source_document(db, config, model, resume, fresh=fresh)
+    except ResumeUnread as unread:
+        return TailoringResult(status="failed", error=TailoringError(code="resume_unread", retryable=unread.retryable, detail=unread.detail))
     finally:
         COST_METER.reset(meter_token)
-    if source_tuple is None:
-        return TailoringResult(
-            status="failed",
-            error=TailoringError(code="no_source", retryable=False, detail="Your resume has no work history to tailor yet. Add it in your Profile."),
-        )
     identity = job_identity(job["url"])
     pdigest = evidence.profile_digest(profile)
     dsha = digest(job["description"])[:20]

@@ -601,11 +601,13 @@ function AddResume({ file, setFile }: { file: File | null; setFile: (f: File | n
     void run(
       "upload",
       async () => {
-        await api("/resumes", "POST", form);
+        const added = await api<{ warnings?: string[] }>("/resumes", "POST", form);
         setFile(null);
         await refresh();
+        return added;
       },
-      "Resume added.",
+      // What it couldn't read of the file (a page that is a picture, a very long resume) is the person's to know.
+      (added) => ["Resume added.", ...(added?.warnings ?? [])].join(" "),
     );
   };
   return (

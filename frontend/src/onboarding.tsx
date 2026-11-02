@@ -408,13 +408,32 @@ function stepProblem(step: StepId, d: Draft): string {
 // What the last resume read gave, so reading a different resume replaces it rather than stacking on top (work and schooling are only
 // filled when empty; without this, choosing another resume left the first one's jobs in place under a message saying the new
 // ones were found). Entries the person has since edited no longer match, so they are kept.
-let lastRead: Partial<Draft> | null = null;
+let lastRead: { projects?: { name: string; description: string }[] } & Partial<Draft> | null = null;
 const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
 const US_STATES = new Set("AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY".split(" "));
 
-function mergeExtract(draft: Draft, x: Partial<Draft>, before: Partial<Draft> | null): Draft {
+// What a resume read adds beyond the profile's fields. The notice says when a long resume was read only in part.
+type Extract = Partial<Draft> & { projects?: { name: string; description: string }[]; notice?: string };
+
+/** A resume's projects as the notes Profile shows under Work: "Project: name", then its bullets, which is how tailoring reads them (evidence.py). */
+const projectNotes = (x: Extract | null) =>
+  (x?.projects ?? []).filter((p) => p.name?.trim()).map((p) => `Project: ${p.name.trim()}\n${(p.description || "").trim()}`.trim());
+
+function mergeExtract(draft: Draft, x: Extract, before: Extract | null): Draft {
   const next = { ...draft };
+  // The same replace-unless-edited as work and schooling below.
+  const stale = new Set(projectNotes(before));
+  const kept = (next.evidence || []).filter((e) => !stale.has(e.text));
+  const added = projectNotes(x).filter((text) => !kept.some((e) => e.text === text));
+  const used = new Set(kept.map((e) => e.id));
+  next.evidence = [...kept];
+  for (const text of added) {
+    let n = 1;
+    while (used.has(`resume-project-${n}`)) n += 1;
+    used.add(`resume-project-${n}`);
+    next.evidence.push({ id: `resume-project-${n}`, text });
+  }
   for (const key of ["first_name", "last_name", "email", "phone", "location", "linkedin", "github", "website"] as const) {
     const unchanged = before && String(next[key] || "") === String(before[key] || "");
     if ((!String(next[key] || "").trim() || unchanged) && x[key]) next[key] = x[key] as string;
@@ -822,6 +841,8 @@ function ResumeStep({
   const [file, setFile] = useState<File | null>(null);
   const [state, setState] = useState<"idle" | "uploading" | "reading" | "done" | "error">("idle");
   const [message, setMessage] = useState("");
+  // What AXIOM couldn't read of this file (a page that is a picture, a very long resume), said beside what it did find.
+  const [cautions, setCautions] = useState<string[]>([]);
   // The resume a failed read can be tried on again, without choosing the file again.
   const [readId, setReadId] = useState("");
 
@@ -836,17 +857,24 @@ function ResumeStep({
     try {
       // Applications attach the newest resume unless a job chose another; picking one here makes it that one.
       await api(`/resumes/${encodeURIComponent(resumeId)}/prefer`, "POST").catch(() => null);
-      const extracted = await api<Partial<Draft>>("/profile/extract?resume_id=" + encodeURIComponent(resumeId), "POST");
+      const extracted = await api<Extract>("/profile/extract?resume_id=" + encodeURIComponent(resumeId), "POST");
       const before = lastRead;
       lastRead = extracted;
       setDraft((d) => mergeExtract(d, extracted, before));
-      setState("done");
       const parts = [
         extracted.work?.length ? `${extracted.work.length} role${extracted.work.length === 1 ? "" : "s"}` : "",
         extracted.education?.length ? `${extracted.education.length} school${extracted.education.length === 1 ? "" : "s"}` : "",
+        extracted.projects?.length ? `${extracted.projects.length} project${extracted.projects.length === 1 ? "" : "s"}` : "",
         extracted.skills?.length ? `${extracted.skills.length} skills` : "",
       ].filter(Boolean);
-      setMessage(parts.length ? "Found " + parts.join(", ") + ". Check them below." : "Resume read, but no jobs or schools were found in it. You can add them in Profile after setup.");
+      if (extracted.notice) setCautions((list) => [...list, extracted.notice!]);
+      // Read, and nothing in it: not a success, and the person has to know that before they rely on it.
+      setState(parts.length ? "done" : "error");
+      setMessage(
+        parts.length
+          ? "Found " + parts.join(", ") + ". Check them below."
+          : "AXIOM read this PDF and found no jobs, schools or skills in it. Employers would still get this file as it is. Try another copy of your resume, or type your details instead.",
+      );
     } catch (e) {
       setState("error");
       // The server's words for a missing key name a settings file; here the fix is one step back.
@@ -861,6 +889,7 @@ function ResumeStep({
 
   async function upload(chosen: File) {
     setFile(chosen);
+    setCautions([]);
     setState("uploading");
     setMessage("Uploading…");
     const form = new FormData();
@@ -869,8 +898,9 @@ function ResumeStep({
     form.append("roles", "");
     try {
       // ?reuse: the same file again (after a failed read, or a guide closed half way) is that resume, not a mistake.
-      const row = await api<{ id: string; name: string }>("/resumes?reuse=1", "POST", form);
+      const row = await api<{ id: string; name: string; warnings?: string[] }>("/resumes?reuse=1", "POST", form);
       setResumes((list) => [row, ...(list || []).filter((r) => r.id !== row.id)]);
+      setCautions(row.warnings ?? []);
       await read(row.id);
     } catch (e) {
       setReadId("");
@@ -889,6 +919,7 @@ function ResumeStep({
           if (f) upload(f);
           else {
             setFile(null);
+            setCautions([]);
             setState("idle");
             setMessage("");
           }
@@ -925,6 +956,12 @@ function ResumeStep({
           )}
         </p>
       )}
+      {!busy &&
+        cautions.map((c) => (
+          <p key={c} className="ax-error" role="alert">
+            {c}
+          </p>
+        ))}
       {!file && resumes && resumes.length > 0 && (
         <Section title="Or use one you've already added">
           <ul className="ax-rows" aria-label="Uploaded resumes">
@@ -933,7 +970,14 @@ function ResumeStep({
                 <span className="ax-row-main">
                   <strong>{r.name}</strong>
                 </span>
-                <Button size="sm" disabled={busy} onClick={() => read(r.id)}>
+                <Button
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => {
+                    setCautions([]);
+                    read(r.id);
+                  }}
+                >
                   Use this one
                 </Button>
               </li>

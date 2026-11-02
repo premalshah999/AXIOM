@@ -38,7 +38,10 @@ def router(service) -> APIRouter:
             raise ValueError("This file isn't really a PDF. Open your resume and choose File, then Save As or Export, then PDF, and add that file.")
         if not name.strip() or len(name) > 120 or len(roles) > 2000:
             raise ValueError("Give this resume a short name and role tags")
+        from ...features.resumes.master import picture_pages, readable_text
+
         refusal = ""
+        warnings = []
         try:
             reader = PdfReader(io.BytesIO(content))
             # Most "locked" resumes are only restricted (no editing or copying) and open without a password: Word's and Preview's
@@ -48,15 +51,32 @@ def router(service) -> APIRouter:
             elif len(reader.pages) > 20:
                 refusal = "This PDF is longer than 20 pages. A resume is one or two pages: add the resume itself."
             else:
-                text = "\n".join(page.extract_text() or "" for page in reader.pages)[:40000]
+                whole = readable_text(reader)
+                text = whole[:40000]
+                pictures = picture_pages(reader)
+                if len(whole) > len(text):
+                    warnings.append("This resume is very long, so AXIOM reads only the start of it. A resume of one or two pages works best.")
         except Exception:
             refusal = "This PDF is damaged or locked in a way AXIOM can't read. Save your resume as a new PDF and add that."
         if refusal:
             raise ValueError(refusal)
-        if len(text.strip()) < 30:
+        # A scan can carry a scanner's footer, so a few words don't make it readable.
+        if len(text.strip()) < 30 or len(pictures) == len(reader.pages):
             raise ValueError(
                 "This PDF is a picture of your resume, so AXIOM can't read the words. Open the original in Word, Pages or "
                 "Google Docs, choose File, then Save As or Download, then PDF, and add that file."
+            )
+        # A font saved without its letters reads as "(cid:12)" and symbols: there is text, and none of it is words.
+        if sum(c.isalpha() for c in text) < 0.5 * sum(not c.isspace() for c in text):
+            raise ValueError(
+                "The words in this PDF come out as symbols when AXIOM reads them, so it can't use them. Open the original in Word, Pages or "
+                "Google Docs, choose File, then Save As or Download, then PDF, and add that file."
+            )
+        if pictures:
+            pages = ", ".join(str(n) for n in pictures)
+            warnings.append(
+                f"{'Page' if len(pictures) == 1 else 'Pages'} {pages} of this PDF {'is a picture' if len(pictures) == 1 else 'are pictures'}, so AXIOM "
+                "can't read the words there. Save your resume as a new PDF from Word, Pages or Google Docs and add that, or anything on those pages will be missed."
             )
         sha = hashlib.sha256(content).hexdigest()
         filename = sha + ".pdf"
@@ -65,7 +85,7 @@ def router(service) -> APIRouter:
             if same and reuse:
                 # The setup guide: the same file again, after a failed read or a guide closed half way, is that resume.
                 result = record(same)
-                return {k: v for k, v in result.items() if k not in {"text", "filename"}}
+                return {**{k: v for k, v in result.items() if k not in {"text", "filename"}}, "warnings": warnings}
             if same:
                 raise ValueError("You've already added this resume.")
             if s.scalar(select(func.count()).select_from(Resume).where(Resume.demo.is_(False))) >= 10:
@@ -83,7 +103,7 @@ def router(service) -> APIRouter:
             s.add(row)
             s.flush()
             result = record(row)
-        return {k: v for k, v in result.items() if k not in {"text", "filename"}}
+        return {**{k: v for k, v in result.items() if k not in {"text", "filename"}}, "warnings": warnings}
 
     @r.get("/api/resumes/{resume_id}/download")
     def download_resume(resume_id: str):

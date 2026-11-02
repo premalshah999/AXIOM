@@ -397,6 +397,7 @@ function ModePicker({ view, onChanged }: { view: View; onChanged: () => void }) 
 }
 
 function Failed({ view, onChanged }: { view: View; onChanged: () => void }) {
+  const { go } = useWorkspace();
   const { pending, run } = useAction();
   const detail = view.rule_problems[0]?.message || view.choice?.error?.detail || view.choice?.error?.code || "Something went wrong.";
   return (
@@ -416,6 +417,11 @@ function Failed({ view, onChanged }: { view: View; onChanged: () => void }) {
       >
         Try again
       </Button>
+      {view.choice?.error?.code === "resume_unread" && (
+        <Button disabled={pending !== null} onClick={() => go({ view: "resumes" })}>
+          Open Resumes
+        </Button>
+      )}
     </div>
   );
 }
