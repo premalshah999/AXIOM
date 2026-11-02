@@ -4866,8 +4866,17 @@ class BrowserEngine:
             )
             self.emit("navigation", "Opened the employer's SuccessFactors login to start its session")
             await self.page.goto(login, wait_until="domcontentloaded", timeout=60000)
-            await self.form.settle(timeout=6)
-            obs = await self.form.scan()
+            # The login page redirects once more after domcontentloaded; a scan in that window reads no document (Farmers,
+            # 2026-11-01: three empty reads ended the run "stopped responding" on a sign-in page that rendered a moment later).
+            for attempt in range(6):
+                await self.form.settle(timeout=6 if attempt == 0 else 3)
+                try:
+                    obs = await self.form.scan()
+                except PlaywrightError:
+                    obs = {**obs, "observation_failure": True}
+                if not blank(obs) and not obs.get("observation_failure"):
+                    break
+                await asyncio.sleep(1.5)
         return obs
 
     async def recover_empty_observation(self, obs):
