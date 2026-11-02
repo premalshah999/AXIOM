@@ -430,7 +430,7 @@ function EmployerPassword({
     >
       <p className="ax-hint">
         Reset the password on {a.origin ? <External href={a.origin}>{a.host}</External> : a.host} yourself
-        {a.login_email ? <> (sign-in email {a.login_email})</> : null}, then enter it here. It is encrypted on the server
+        {a.login_email ? <> (sign-in email {a.login_email})</> : null}, then enter it here. It is encrypted on this Mac
         and never shown again.
       </p>
       <div className="ax-field">
