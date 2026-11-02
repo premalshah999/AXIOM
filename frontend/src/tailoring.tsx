@@ -744,6 +744,8 @@ function Review({ view, onView, onChanged }: { view: View; onView: (v: View) => 
                 {s.entries.map((e, ei) => {
                   const removable = !view.report.workspace_id && s.kind === "projects" && source.sections.some((x) => x.entries.some((y) => y.id === e.id));
                   const generated = !!view.report.workspace_id && !source.sections.some((x) => x.entries.some((y) => y.id === e.id));
+                  // A project a draft took the place of isn't on this resume, and "Choose your projects" above brings it back.
+                  if (view.report.workspace_id && !e.include) return null;
                   return (
                     <article key={e.id} className={"tl-entry" + (e.include ? "" : " is-off")}>
                       <header>

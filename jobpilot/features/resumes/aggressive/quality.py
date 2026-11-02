@@ -7,7 +7,7 @@ from ..._store import norm
 from .. import ats, claims, gates
 from ..editor import Section
 from ..normal import refuse_reason
-from ..rules import live_bullets, live_entries, skill_items
+from ..rules import bullet_window, live_bullets, live_entries, skill_items
 
 DESCRIPTORS = {"Personal project", "Open source", "Internal tool", "Research"}
 VENDORS = {
@@ -107,26 +107,64 @@ def describe(bullet):
     return COMMAND.sub(lambda m: third_person(m[1]), text)
 
 
-def project_shapes(doc):
-    """Bullet lengths of the resume's own projects, in order: a draft takes one's place, at its size."""
-    return [
-        [len(b.text) for b in e.bullets if b.include and b.text.strip()]
+# A plan holds up to three drafts of up to eight bullets (schema.py).
+MOST_DRAFTS, MOST_BULLETS = 3, 8
+# Roughly what the default 2000-token reply holds. A fix that would run past it asks for fewer wordings, then fewer bullets.
+FIX_REPLY_CHARS = 5000
+# Shorter words that say the same thing: a bullet a few characters over needs no model, and no draft is lost for it.
+TIGHTER = (
+    (re.compile(r"\.$"), ""),
+    (re.compile(r",(?= and\b| then\b| so\b)"), ""),
+    (re.compile(r"\bin order to\b", re.I), "to"),
+    (re.compile(r"\bso that\b", re.I), "so"),
+    (re.compile(r"\bas well as\b", re.I), "and"),
+    (re.compile(r"\bwithout having to\b", re.I), "without"),
+)
+
+
+def project_slots(doc):
+    """The resume's own projects a draft can take the place of, in order. A project with no bullets has no size to keep."""
+    slots = [
+        e
         for s in doc.sections
         if s.include and s.kind == "projects"
-        for e in s.entries
-        if e.include
+        for e in live_entries(s)
+        if 1 <= len(live_bullets(e)) <= MOST_BULLETS
     ]
+    return slots[:MOST_DRAFTS]
+
+
+def project_shapes(doc):
+    """Each bullet's allowed (fewest, most) characters in those projects: a draft takes one's place, at its size."""
+    return [[bullet_window(b.text) for b in live_bullets(e)] for e in project_slots(doc)]
 
 
 def shape_problems(p, shape):
     """The owner's rule for every bullet: the same count as the project it replaces, and the same length or up to 10% shorter."""
     if len(p.bullets) != len(shape):
-        return [f"{p.title}: use exactly {len(shape)} bullets, like the project it replaces"]
-    return [
-        f"{p.title}: bullet {i + 1} is {len(b)} characters, it must be {int(n * 0.9 + 0.999)} to {n}"
-        for i, (b, n) in enumerate(zip(p.bullets, shape))
-        if not n * 0.9 <= len(b) <= n
-    ]
+        return [f"{p.title}: has {len(p.bullets)} bullets, write exactly {len(shape)}, like the project it replaces"]
+    problems = []
+    for i, (b, (low, high)) in enumerate(zip(p.bullets, shape)):
+        n = len(b.strip())
+        if n > high:
+            problems.append(f"{p.title}: bullet {i + 1} has {n} characters, cut {n - high} to {n - low} so it has {low} to {high}")
+        elif n < low:
+            problems.append(f"{p.title}: bullet {i + 1} has {n} characters, add {low - n} to {high - n} so it has {low} to {high}")
+    return problems
+
+
+def shape_issues(proposals, shapes):
+    return [problem for p, shape in zip(proposals, shapes) for problem in shape_problems(p, shape)]
+
+
+def tighten(text, low, high):
+    """The same bullet a little shorter when that lands in its window. Otherwise it is left for the repair, word for word."""
+    shorter = text.strip()
+    for pattern, said in TIGHTER:
+        if len(shorter) <= high:
+            break
+        shorter = pattern.sub(said, shorter)
+    return shorter if low <= len(shorter) <= high else text
 
 
 def normalize_proposals(proposals, shapes=()):
@@ -136,8 +174,9 @@ def normalize_proposals(proposals, shapes=()):
         p.bullets = [describe(b) for b in p.bullets]
     if shapes:
         ordered = sorted(proposals, key=lambda p: p.proof_point)[: len(shapes)]
-        for i, p in enumerate(ordered):
+        for i, (p, shape) in enumerate(zip(ordered, shapes)):
             p.proof_point = min(i, 2)
+            p.bullets = [tighten(b, *window) for b, window in zip(p.bullets, shape)]
         return ordered
     ordered = sorted(proposals, key=lambda p: p.proof_point)
     free = [i for i in range(len(ordered)) if i not in {p.proof_point for p in ordered}]
@@ -152,6 +191,47 @@ def normalize_proposals(proposals, shapes=()):
                 p.bullets = p.bullets[:2]
             third = True
     return sorted(ordered, key=lambda p: p.proof_point)
+
+
+def shape_request(proposals, shapes):
+    """The short request for one bounded fix: only the bullets that miss, each with its exact numbers."""
+    wanted = []
+    for d, (p, shape) in enumerate(zip(proposals, shapes)):
+        for i, (low, high) in enumerate(shape):
+            text = p.bullets[i].strip() if i < len(p.bullets) else ""
+            n = len(text)
+            if low <= n <= high:
+                continue
+            change = f"cut {n - high} to {n - low} characters" if n > high else f"add {low - n} to {high - n} characters"
+            wanted.append(
+                {"draft": d, "title": p.title, "data_source": p.data_source, "tools": p.tools, "bullet": i, "text": text,
+                 "chars": n, "min_chars": low, "max_chars": high, "aim_chars": (low + high) // 2, "change": change}
+            )
+    room = 0
+    fits = []
+    for item in wanted:
+        if room + item["max_chars"] > FIX_REPLY_CHARS:
+            break
+        room += item["max_chars"]
+        fits.append(item)
+    return {"bullets": fits, "wordings_per_bullet": max(1, min(3, FIX_REPLY_CHARS // max(room, 1)))}
+
+
+def apply_shape_fix(proposals, shapes, fix, history, posting):
+    """Each bullet takes the first wording that lands in its window and breaks no truth check. Otherwise it stays as it was."""
+    for item in sorted(fix.bullets, key=lambda x: (x.draft, x.bullet)):
+        if item.draft >= min(len(proposals), len(shapes)):
+            continue
+        p, shape = proposals[item.draft], shapes[item.draft]
+        if item.bullet >= len(shape) or item.bullet > len(p.bullets):
+            continue
+        low, high = shape[item.bullet]
+        for wording in item.wordings:
+            text = tighten(describe(gates.sanitize(wording)), low, high)
+            trial = p.model_copy(update={"bullets": [*p.bullets[: item.bullet], text, *p.bullets[item.bullet + 1 :]]})
+            if low <= len(text) <= high and not proposal_problems(trial, history, posting):
+                p.bullets = trial.bullets
+                break
 
 
 def proposal_problems(p, history, posting):
@@ -194,8 +274,9 @@ def proposal_issues(proposals, history, posting, shapes=()):
     if len({p.archetype for p in proposals}) != len(proposals):
         problems.append("Choose distinct project archetypes")
     if shapes:
-        for p, shape in zip(proposals, shapes):
-            problems += shape_problems(p, shape)
+        if len(proposals) < len(shapes):
+            problems.append(f"Write {len(shapes)} proposals, one for each item of project_shapes")
+        problems += shape_issues(proposals, shapes)
     else:
         if len(proposals) != 3:
             problems.append("Choose three distinct project archetypes")
@@ -210,8 +291,8 @@ def proposal_issues(proposals, history, posting, shapes=()):
 
 
 def keep_sound(proposals, history, posting, shapes=()):
-    """After the one repair: the drafts that pass every check, and why the others were left out. A failed draft never reaches
-    a resume, and it no longer costs the person the rest of the tailoring (every real-model run failed that way, 2026-11-01)."""
+    """After the repairs: the drafts that pass every check, and why the others were left out. A failed draft never reaches a
+    resume, and it no longer costs the person the rest of the tailoring (every real-model run failed that way, 2026-11-01)."""
     kept, dropped, archetypes = [], [], set()
     for i, p in enumerate(proposals):
         problems = proposal_problems(p, history, posting)

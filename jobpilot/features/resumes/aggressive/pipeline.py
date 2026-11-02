@@ -16,7 +16,7 @@ from ..modes import Draft, ModeResult, ModeSpec
 from ..rules import bullet_window, check_rules, live_bullets, live_entries
 from ..validate import parse_check
 from . import prompts, quality, store
-from .schema import Brief, Critique, Plan, Revision
+from .schema import Brief, Critique, Plan, Revision, ShapeFix
 
 
 def payload(source, profile, ctx, hard_text, brief, history, allowed):
@@ -44,6 +44,17 @@ def payload(source, profile, ctx, hard_text, brief, history, allowed):
     }
 
 
+def shape_brief(slots, shapes):
+    """What a model needs to write a draft at the size of the project it replaces: the exact numbers for each bullet."""
+    return [
+        {
+            "replaces": entry.heading or entry.subheading or entry.id,
+            "bullets": [{"min_chars": low, "max_chars": high, "aim_chars": (low + high) // 2} for low, high in shape],
+        }
+        for entry, shape in zip(slots, shapes)
+    ]
+
+
 def sanitize_plan(plan):
     plan = plan.model_copy(deep=True)
     for p in plan.proposals:
@@ -62,14 +73,24 @@ def with_projects(doc, workspace):
                 if e.id in removed:
                     e.include = False
     selected = [d for d in workspace["drafts"] if d["id"] in workspace["selected_drafts"]]
-    entries = [store.entry(d) for d in selected]
-    if entries:
+    leading = []
+    for d in selected:
+        # A draft sits where the project it replaces sat. One that replaces nothing leads the section.
+        home = next(
+            (s for s in doc.sections if s.kind == "projects" and any(e.id == d.get("replaces") for e in s.entries)),
+            None,
+        )
+        if home is None:
+            leading.append(store.entry(d))
+        else:
+            at = next(i for i, e in enumerate(home.entries) if e.id == d["replaces"])
+            home.entries.insert(at, store.entry(d))
+    if leading:
         section = next((s for s in doc.sections if s.include and s.kind == "projects"), None)
         if section is None:
             section = Section(id="aggressive-projects", title="Projects", kind="projects")
             doc.sections.append(section)
-        # Proposed proof points lead, and originals remain unless deselected.
-        section.entries = entries + section.entries
+        section.entries = leading + section.entries
     return doc, selected
 
 
@@ -172,12 +193,11 @@ async def run(job, source, profile, ctx):
     base, extra = quality.inventory(source.doc, profile, ctx.evidence)
     allowed = list(dict.fromkeys([*base, *extra]))
     history = store.recent(ctx.db, job)
+    slots = quality.project_slots(source.doc)
     shapes = quality.project_shapes(source.doc)
     data = payload(source, profile, ctx, hard, brief, history, allowed)
     if shapes:
-        data["project_shapes"] = [
-            [{"min_chars": int(n * 0.9 + 0.999), "max_chars": n} for n in shape] for shape in shapes
-        ]
+        data["project_shapes"] = shape_brief(slots, shapes)
     plan = sanitize_plan(await ask(Plan, prompts.WRITE, data))
     plan.proposals = quality.normalize_proposals(plan.proposals, shapes)
     forbidden = [r for r in ctx.ats_source.get("keywords", []) if r.get("status") == "needed"]
@@ -185,7 +205,8 @@ async def run(job, source, profile, ctx):
     posting = job["description"]
     issues = quality.proposal_issues(plan.proposals, history, posting, shapes)
     dropped = []
-    if refused or issues:
+    # Lengths alone need no new plan: the short fix below gives those bullets their exact numbers, for far fewer tokens.
+    if refused or set(issues) - set(quality.shape_issues(plan.proposals, shapes)):
         attempts.append({"stage": "generation", "refused_edits": refused, "proposal_issues": issues})
         plan = sanitize_plan(
             await ask(
@@ -196,14 +217,34 @@ async def run(job, source, profile, ctx):
         )
         plan.proposals = quality.normalize_proposals(plan.proposals, shapes)
         real, refused = quality.apply_revision(source.doc, plan, allowed, hard, forbidden)
-        if quality.proposal_issues(plan.proposals, history, posting, shapes):
-            # Only the drafts that pass every check go on: with none left, the real projects carry the resume.
-            plan.proposals, dropped = quality.keep_sound(plan.proposals, history, posting, shapes)
-            attempts.append({"stage": "drafts_left_out", "drafts": dropped})
-    # Refused factual/length edits stay at source. They never bypass the guard.
-    # A draft takes the place of the project at its position; "Use only my original projects" brings them back.
-    originals = [e.id for s in source.doc.sections if s.include and s.kind == "projects" for e in s.entries if e.include]
-    workspace = store.create(ctx.db, job, source, profile, plan.proposals, brief, removed=originals[: len(plan.proposals)])
+    misses = quality.shape_issues(plan.proposals, shapes)
+    if misses:
+        # One bounded call. It is a second chance, so a failed one only leaves those drafts out.
+        step = {"stage": "shape_repair", "issues": misses}
+        attempts.append(step)
+        try:
+            fix = await ask(ShapeFix, prompts.SHAPE, quality.shape_request(plan.proposals, shapes))
+            quality.apply_shape_fix(plan.proposals, shapes, fix, history, posting)
+            step["left"] = quality.shape_issues(plan.proposals, shapes)
+        except Exception as exc:
+            step["error"] = type(exc).__name__
+    kept = plan.proposals
+    if quality.proposal_issues(plan.proposals, history, posting, shapes):
+        # Only the drafts that pass every check go on: with none left, the real projects carry the resume.
+        kept, dropped = quality.keep_sound(plan.proposals, history, posting, shapes)
+        attempts.append({"stage": "drafts_left_out", "drafts": dropped})
+    # A draft takes the place of the project at its position, and a draft left out leaves that project where it is.
+    # "Use only my original projects" brings them all back. Refused factual/length edits stay at source.
+    still = {id(p) for p in kept}
+    replaces = [entry.id for p, entry in zip(plan.proposals, slots) if id(p) in still]
+    plan.proposals = kept
+    workspace = store.create(ctx.db, job, source, profile, plan.proposals, brief, replaces=replaces)
+    # A workspace can be an earlier run's, so its drafts say which sizes they keep.
+    places = {entry.id: (entry, shape) for entry, shape in zip(slots, shapes)}
+    held = [places[d["replaces"]] for d in workspace["drafts"] if d.get("replaces") in places]
+    if len(held) != len(workspace["drafts"]):
+        held = []
+    draft_shapes = [shape for _, shape in held]
     doc, selected = with_projects(real, workspace)
     result = await compile_and_check(
         doc, source, ctx, selected, workspace, allowed, tailored_style(source.style)
@@ -223,6 +264,7 @@ async def run(job, source, profile, ctx):
             prompts.FIX,
             {
                 **data,
+                "project_shapes": shape_brief([entry for entry, _ in held], draft_shapes),
                 "current_plan": plan.model_dump(),
                 "drafts": workspace["drafts"],
                 "critique": critique.model_dump(),
@@ -230,12 +272,12 @@ async def run(job, source, profile, ctx):
             },
         )
         revised_workspace = workspace
-        if len(revision.proposals) == 3 and len(workspace["drafts"]) == 3:
+        if workspace["drafts"] and len(revision.proposals) == len(workspace["drafts"]):
             # Sanitize before re-running every proposal gate. The original
             # draft's bullet count is the fixed budget for critique edits.
             revised = sanitize_plan(Plan(proposals=revision.proposals)).proposals
-            revised = quality.normalize_proposals(revised, shapes)
-            proposal_errors = quality.proposal_issues(revised, history, posting, shapes)
+            revised = quality.normalize_proposals(revised, draft_shapes)
+            proposal_errors = quality.proposal_issues(revised, history, posting, draft_shapes)
             if [len(p.bullets) for p in revised] != [len(p["bullets"]) for p in workspace["drafts"]]:
                 proposal_errors.append("Critique changes a draft project's bullet count")
             if proposal_errors:
@@ -369,7 +411,7 @@ async def run(job, source, profile, ctx):
 
 def estimate_tokens(resume_chars, posting_chars):
     # Three required calls (brief/write/blind critic), one revision, one bounded
-    # repair. Includes schema overhead; the actual meter wins after execution.
+    # repair (a full plan, or the far smaller length fix). Includes schema overhead; the actual meter wins after execution.
     return int(11000 + resume_chars * 1.5 + posting_chars * 1.3), 6500
 
 
