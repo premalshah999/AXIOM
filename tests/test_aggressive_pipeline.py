@@ -957,7 +957,7 @@ def test_a_length_miss_costs_one_short_fix_and_never_a_new_plan(tmp_path):
     assert asked[0]["change"].startswith("cut ")
     # The fix is told the rules, and carries no plan, posting or resume: it is the short call.
     system = next(c for c in model.calls if c[0] == "ShapeFix")[1]
-    assert "[target: ...]" in system and "never say it was built" in system
+    assert "[target: ...]" in system and "never past tense" in system
     assert len(json.dumps(asked)) < 1500
     assert result.report["drafts_left_out"] == []
     assert [d.bullets[0] for d in result.drafts][0] == FIXED_0 and result.drafts[2].bullets[1] == FIXED_2
