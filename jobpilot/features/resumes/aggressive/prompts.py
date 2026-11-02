@@ -20,6 +20,8 @@ Each must be buildable solo in one or two weekends with AI help, using a real na
 no proprietary data or multi-month scope. Name at least one actual JD tool/method per proposal. A tool needed
 for a proposal is NOT a skill the applicant has. No invented links, employers, schools, courses or dates.
 Descriptors: Personal project, Open source, Internal tool, Research, or one genuine one-word domain.
+Return proposals in proof-point order 0, 1, 2. data_source is the input's short proper name, at most six words, and
+bullet 1 must use that name exactly. tools must hold at least one tool or method spelled exactly as the posting spells it.
 Exactly two bullets each, at most one proposal has a third (6–7 total). Bullet 1: what to build, real data source,
 user outcome. Bullet 2: a decision, tradeoff, obstacle or production concern. Optional third: validation.
 Use future tense ('Build', 'Compare') and mark ALL unmeasured results [measure after building]. Never invent

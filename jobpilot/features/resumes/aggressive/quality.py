@@ -48,7 +48,83 @@ def coverage(text, keywords):
     }
 
 
-def proposal_issues(proposals, history, hard_text):
+# Words that say what kind of thing a data source is, not which one it is.
+SOURCE_FILLER = frozenset(
+    "a an and api archive archives by corpus data database dataset datasets export exports feed files for from in "
+    "of on open portal public record records repository set sets the via".split()
+)
+
+
+def names_input(bullet, data_source):
+    """Whether a bullet names the project's input, however the sentence words it. The real model writes "FCC broadband
+    records" for "FCC Broadband Data Collection records": half of the source's distinctive words is the same source."""
+    if contains(bullet, data_source):
+        return True
+    words = [w for w in re.findall(r"[A-Za-z0-9][\w+.-]*", data_source) if w.casefold() not in SOURCE_FILLER]
+    return bool(words) and 2 * sum(contains(bullet, w) for w in words) >= len(words)
+
+
+def in_posting(posting, tool):
+    """The posting asks for this tool or method, in that phrase or in all of its words."""
+    if contains(posting, tool):
+        return True
+    words = re.findall(r"[A-Za-z0-9][\w+.-]*", tool)
+    return bool(words) and all(contains(posting, w) for w in words)
+
+
+def normalize_proposals(proposals):
+    """Shape is arithmetic, so code settles it. Order by proof point, give each proposal its own, and keep one third bullet."""
+    ordered = sorted(proposals, key=lambda p: p.proof_point)
+    free = [i for i in range(len(ordered)) if i not in {p.proof_point for p in ordered}]
+    seen = set()
+    third = False
+    for p in ordered:
+        if p.proof_point in seen and free:
+            p.proof_point = free.pop(0)
+        seen.add(p.proof_point)
+        if len(p.bullets) > 2:
+            if third:
+                p.bullets = p.bullets[:2]
+            third = True
+    return sorted(ordered, key=lambda p: p.proof_point)
+
+
+def proposal_problems(p, history, posting):
+    """What is wrong with one proposal. The truth checks live here: a draft failing any of them never reaches a resume."""
+    problems = []
+    inputs = Counter(norm(d["data_source"]) for app in history for d in app)
+    if p.descriptor not in DESCRIPTORS and not re.fullmatch(r"[A-Za-z]+", p.descriptor):
+        problems.append(f"{p.title}: descriptor must state provenance or one domain word")
+    if not any(in_posting(posting, t) for t in p.tools):
+        problems.append(f"{p.title}: name an actual posting tool or method")
+    if not any(names_input(b, p.data_source) for b in p.bullets):
+        problems.append(f"{p.title}: name its real public input in a bullet")
+    combined = " ".join([p.title, *p.bullets, *p.build_plan])
+    if claims.URL.search(combined):
+        problems.append(f"{p.title}: remove proposed links")
+    if gates.first_person(combined):
+        problems.append(f"{p.title}: remove first person")
+    if any(re.search(r"\b" + re.escape(w) + r"\b", combined, re.I) for w in gates.BANNED):
+        problems.append(f"{p.title}: remove filler")
+    if re.search(r"independent deploys|team velocity|onboarding friction", combined, re.I):
+        problems.append(f"{p.title}: a solo project needs solo obstacles")
+    if sum(bool(gates.ANY_METRIC.search(b)) for b in p.bullets) > 1:
+        problems.append(f"{p.title}: at most one headline metric")
+    if any(gates.ANY_METRIC.search(b) and "[measure after building]" not in b for b in p.bullets):
+        problems.append(f"{p.title}: mark unmeasured results [measure after building]")
+    if any(re.match(r"Built|Deployed|Achieved|Reduced|Shipped|Saved", b) for b in p.bullets):
+        problems.append(f"{p.title}: proposed work must not claim completed work")
+    if inputs[norm(p.data_source)] >= 3 and any(
+        norm(d["data_source"]) == norm(p.data_source)
+        and (d["archetype"] == p.archetype or d["metric_shape"] == p.metric_shape)
+        for app in history
+        for d in app
+    ):
+        problems.append(f"{p.title}: repeated input + archetype + metric shape in the last 15 jobs")
+    return problems
+
+
+def proposal_issues(proposals, history, posting):
     problems = []
     if len({p.archetype for p in proposals}) != 3:
         problems.append("Choose three distinct project archetypes")
@@ -57,37 +133,25 @@ def proposal_issues(proposals, history, hard_text):
     counts = [len(p.bullets) for p in proposals]
     if sum(counts) not in (6, 7) or counts.count(3) > 1:
         problems.append("Use 2,2,2 or 2,2,3 proposal bullets")
-    inputs = Counter(norm(p["data_source"]) for app in history for p in app)
     for p in proposals:
-        if p.descriptor not in DESCRIPTORS and not re.fullmatch(r"[A-Za-z]+", p.descriptor):
-            problems.append(f"{p.title}: descriptor must state provenance or one domain word")
-        if not any(contains(hard_text, t) for t in p.tools):
-            problems.append(f"{p.title}: name an actual posting tool or method")
-        if not any(contains(b, p.data_source) for b in p.bullets):
-            problems.append(f"{p.title}: name its real public input in a bullet")
-        combined = " ".join([p.title, *p.bullets, *p.build_plan])
-        if claims.URL.search(combined):
-            problems.append(f"{p.title}: remove proposed links")
-        if gates.first_person(combined):
-            problems.append(f"{p.title}: remove first person")
-        if any(re.search(r"\b" + re.escape(w) + r"\b", combined, re.I) for w in gates.BANNED):
-            problems.append(f"{p.title}: remove filler")
-        if re.search(r"independent deploys|team velocity|onboarding friction", combined, re.I):
-            problems.append(f"{p.title}: a solo project needs solo obstacles")
-        if sum(bool(gates.ANY_METRIC.search(b)) for b in p.bullets) > 1:
-            problems.append(f"{p.title}: at most one headline metric")
-        if any(gates.ANY_METRIC.search(b) and "[measure after building]" not in b for b in p.bullets):
-            problems.append(f"{p.title}: mark unmeasured results [measure after building]")
-        if any(re.match(r"Built|Deployed|Achieved|Reduced|Shipped|Saved", b) for b in p.bullets):
-            problems.append(f"{p.title}: proposed work must not claim completed work")
-        if inputs[norm(p.data_source)] >= 3 and any(
-            norm(d["data_source"]) == norm(p.data_source)
-            and (d["archetype"] == p.archetype or d["metric_shape"] == p.metric_shape)
-            for app in history
-            for d in app
-        ):
-            problems.append(f"{p.title}: repeated input + archetype + metric shape in the last 15 jobs")
+        problems += proposal_problems(p, history, posting)
     return problems
+
+
+def keep_sound(proposals, history, posting):
+    """After the one repair: the drafts that pass every check, and why the others were left out. A failed draft never reaches
+    a resume, and it no longer costs the person the rest of the tailoring (every real-model run failed that way, 2026-11-01)."""
+    kept, dropped, archetypes = [], [], set()
+    for p in proposals:
+        problems = proposal_problems(p, history, posting)
+        if p.archetype in archetypes:
+            problems.append(f"{p.title}: repeats another draft's archetype")
+        if problems:
+            dropped.append({"title": p.title, "problems": problems})
+        else:
+            archetypes.add(p.archetype)
+            kept.append(p)
+    return kept, dropped
 
 
 def inventory(source, profile, inv):
