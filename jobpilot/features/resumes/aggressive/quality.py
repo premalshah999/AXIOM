@@ -270,9 +270,12 @@ def shape_request(proposals, shapes, history, posting):
             if low <= n <= high:
                 continue
             change = f"cut {n - high} to {n - low} characters" if n > high else f"add {low - n} to {high - n} characters"
+            # Aimed past the middle, the way it has to move: a model asked for a change makes part of it (239 for 242 to 268 after
+            # three rounds aimed at the middle, 2026-11-02).
+            aim = low + (high - low) // 3 if n > high else low + 2 * (high - low) // 3
             wanted.append(
                 {"draft": d, "title": p.title, "data_source": p.data_source, "tools": p.tools, "bullet": i, "text": text,
-                 "chars": n, "min_chars": low, "max_chars": high, "aim_chars": (low + high) // 2, "change": change}
+                 "chars": n, "min_chars": low, "max_chars": high, "aim_chars": aim, "change": change}
             )
     room = 0
     fits = []

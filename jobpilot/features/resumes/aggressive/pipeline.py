@@ -18,8 +18,9 @@ from ..validate import parse_check
 from . import prompts, quality, store
 from .schema import Brief, Critique, Plan, Revision, ShapeFix
 
-# Length repairs per tailoring: models miscount characters, and each round starts from the nearest wording so far.
-SHAPE_ROUNDS = 3
+# Length repairs per tailoring: models miscount characters, and each round starts from the nearest wording so far. Three rounds
+# left one draft 3 characters short (2026-11-02); a round is one short call of a few seconds.
+SHAPE_ROUNDS = 5
 
 
 def payload(source, profile, ctx, hard_text, brief, history, allowed):
