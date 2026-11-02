@@ -765,7 +765,7 @@ function FirstRun({ mail }: { mail: MailStatus | null }) {
     },
     {
       done: submitting,
-      title: "Send applications automatically",
+      title: "Send applications",
       detail: submitting ? "Applications send once every required answer is checked." : "Off: nothing is sent to employers until you turn this on.",
       action: submitting ? "Settings" : pending === "submit-on" ? "Turning on…" : "Turn on",
       onClick: submitting
@@ -777,7 +777,7 @@ function FirstRun({ mail }: { mail: MailStatus | null }) {
                 await api("/control", "PUT", { auto_submit: true });
                 await refresh();
               },
-              "Automatic submission turned on.",
+              "AXIOM will send applications.",
             ),
     },
     {
