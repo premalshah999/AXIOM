@@ -6,12 +6,6 @@
 
 WITH ev AS (
   SELECT r.id, r.job_id, j.ats, r.created_at, r.state AS raw_state,
-         r.reason = 'Worker interrupted before submission; draft recovery scheduled' AS interrupted,
-         r.packet->>'blocker_type' AS blocker,
-         (COALESCE(r.receipt->>'existing_application_notice', 'false') NOT IN ('false', 'null', '0', '')
-          OR COALESCE(r.receipt->>'reconciled_existing_submission', 'false') NOT IN ('false', 'null', '0', '')
-          OR COALESCE(r.receipt->>'matched_existing_application', 'false') NOT IN ('false', 'null', '0', '')
-          OR r.receipt->>'type' = 'employer_already_applied') AS existing,
          CASE
            WHEN COALESCE(r.receipt->>'existing_application_notice', 'false') NOT IN ('false', 'null', '0', '')
              OR COALESCE(r.receipt->>'reconciled_existing_submission', 'false') NOT IN ('false', 'null', '0', '')
@@ -44,7 +38,7 @@ WITH ev AS (
 ), commit_at AS (
   SELECT r.job_id, min(r.created_at) AS at
   FROM runs r JOIN events e ON e.run_id = r.id
-  WHERE e.kind IN ('submitting', 'submission', 'submission_requests', 'step_submit')
+  WHERE e.kind = 'submitting'  -- success_core.COMMIT_EVENT
   GROUP BY r.job_id
 ), best AS (
   SELECT DISTINCT ON (ev.job_id) ev.job_id, ev.grade, (c.at IS NOT NULL AND c.at <= ev.created_at) AS commit_first

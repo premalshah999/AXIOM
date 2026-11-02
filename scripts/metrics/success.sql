@@ -1,6 +1,7 @@
 -- The success number as named queries on the live database (read-only SELECTs). Same rules as jobpilot/api/success_core.py:
--- run one with   axiom psql -XAt -F '|' -v cutoff=2026-10-26T00:48:09Z -f scripts/metrics/success.sql
--- `cutoff` is an ISO timestamp (runs.created_at is text): the cohort is the jobs whose first real run is at or after it.
+-- run one with   axiom psql -XAt -F '|' -v cutoff=2026-10-26T00:48:09.000000+00:00 -f scripts/metrics/success.sql
+-- `cutoff` is an ISO timestamp (runs.created_at is text): the cohort is the jobs whose first real run is at or after it. GET
+-- /api/success gives the one it used as `since`, so the same count can be repeated here.
 --
 -- One statement (no temp views: nothing is written), printing section|key|value rows:
 --   funnel    attempted, confirmed, failed, eligible and the five rates
@@ -8,70 +9,70 @@
 --   failures  the failed jobs by "last state:blocker type"
 --   evidence  the confirmed jobs by the grade of their best receipt (strong|medium|weak, then the kind)
 --   platform  per ATS: attempted|confirmed|eligible|filtered_pct
--- The rules are success_core.py's, line for line; scripts/metrics/check_success.py compares the two on a saved dump.
+-- The rules are success_core.py's, line for line; scripts/metrics/check_success.py compares the two, and
+-- tests/test_success_postgres.py runs both on a real PostgreSQL. Times and ids compare byte by byte (COLLATE "C"), as Python does.
 
 WITH ev AS (
   SELECT r.id, r.job_id, j.ats, r.created_at, r.state AS raw_state,
          r.reason = 'Worker interrupted before submission; draft recovery scheduled' AS interrupted,
          r.packet->>'blocker_type' AS blocker,
-         (COALESCE(r.receipt->>'existing_application_notice', 'false') NOT IN ('false', 'null', '0', '')
-          OR COALESCE(r.receipt->>'reconciled_existing_submission', 'false') NOT IN ('false', 'null', '0', '')
-          OR COALESCE(r.receipt->>'matched_existing_application', 'false') NOT IN ('false', 'null', '0', '')
-          OR r.receipt->>'type' = 'employer_already_applied') AS existing,
+         COALESCE(r.receipt->>'evidence_reconciliation', '') = 'pending' AS pending,
          CASE
-           WHEN COALESCE(r.receipt->>'existing_application_notice', 'false') NOT IN ('false', 'null', '0', '')
-             OR COALESCE(r.receipt->>'reconciled_existing_submission', 'false') NOT IN ('false', 'null', '0', '')
-             OR COALESCE(r.receipt->>'matched_existing_application', 'false') NOT IN ('false', 'null', '0', '')
-             OR r.receipt->>'type' = 'employer_already_applied' THEN 'weak|existing_application_view'
+           WHEN f.ean OR f.res OR f.mea OR r.receipt->>'type' = 'employer_already_applied' THEN 'weak|existing_application_view'
            WHEN r.receipt->>'type' = 'invalid_page_text'
              OR r.receipt->>'evidence_selector' = '[data-automation-id=similar-jobs-heading]' THEN 'weak|page_text_rejected'
            WHEN r.receipt->>'type' IN ('user_reconciled', 'owner_submitted', 'unsent_reconciled',
                                        'reviewed_employer_confirmation_capture') THEN 'weak|applicant_recorded'
            WHEN r.receipt->>'type' = 'final_page_confirmation' THEN 'weak|final_page_quote'
            WHEN r.receipt->>'type' = 'employer_dashboard_status' THEN 'weak|dashboard_status'
-           WHEN r.receipt->>'type' = 'explicit_confirmation_page'
-             AND COALESCE(r.receipt->>'website_confirmed', 'false') NOT IN ('false', 'null', '0', '')
-             THEN CASE WHEN m.ok THEN 'strong|page_and_email' ELSE 'strong|page_only' END
+           WHEN r.receipt->>'type' = 'explicit_confirmation_page' AND f.web
+             THEN CASE WHEN f.mail_ok THEN 'strong|page_and_email' ELSE 'strong|page_only' END
            WHEN r.receipt->>'type' = 'application_created'
-             THEN CASE WHEN m.ok THEN 'strong|platform_and_email' ELSE 'medium|platform_response' END
-           WHEN COALESCE(r.receipt->>'type', '') = '' AND m.present
-             THEN CASE WHEN m.ok THEN 'strong|email_only' ELSE 'weak|email_untrusted_sender' END
+             THEN CASE WHEN f.mail_ok THEN 'strong|platform_and_email' ELSE 'medium|platform_response' END
+           WHEN COALESCE(r.receipt->>'type', '') = '' AND f.mail
+             THEN CASE WHEN f.mail_ok THEN 'strong|email_only' ELSE 'weak|email_untrusted_sender' END
            ELSE 'weak|unrecognised'
          END AS grade
   FROM runs r
   JOIN jobs j ON j.id = r.job_id AND NOT j.demo
-  CROSS JOIN LATERAL (
-    SELECT r.receipt->'email'->>'message_id' IS NOT NULL AS present,
-           r.receipt->'email'->>'message_id' IS NOT NULL
-             AND COALESCE(r.receipt->'email'->>'sender_trusted', 'true') IN ('true', 'True', '1')
-             AND COALESCE(r.receipt->'email'->>'authenticated', 'true') IN ('true', 'True', '1') AS ok
-  ) m
-  WHERE r.job_id IN (SELECT job_id FROM runs WHERE created_at >= :'cutoff')
-), commit_at AS (  -- AXIOM's own earliest run that began a commit, per job
-  SELECT r.job_id, min(r.created_at) AS at
+  CROSS JOIN LATERAL (  -- success_core.yes: a stored value that is not one of its false words
+    SELECT COALESCE(r.receipt->>'existing_application_notice', '') NOT IN ('', 'false', 'False', 'null', '0') AS ean,
+           COALESCE(r.receipt->>'reconciled_existing_submission', '') NOT IN ('', 'false', 'False', 'null', '0') AS res,
+           COALESCE(r.receipt->>'matched_existing_application', '') NOT IN ('', 'false', 'False', 'null', '0') AS mea,
+           COALESCE(r.receipt->>'website_confirmed', '') NOT IN ('', 'false', 'False', 'null', '0') AS web,
+           COALESCE(r.receipt->'email'->>'message_id', '') NOT IN ('', 'false', 'False', 'null', '0') AS mail,
+           COALESCE(r.receipt->'email'->>'message_id', '') NOT IN ('', 'false', 'False', 'null', '0')
+             AND COALESCE(NULLIF(r.receipt->'email'->>'sender_trusted', ''), 'true') IN ('true', 'True', '1')
+             AND COALESCE(NULLIF(r.receipt->'email'->>'authenticated', ''), 'true') IN ('true', 'True', '1') AS mail_ok
+  ) f
+  WHERE r.job_id IN (SELECT job_id FROM runs WHERE created_at COLLATE "C" >= :'cutoff')
+), commit_at AS (  -- success_core.COMMIT_EVENT: AXIOM's own earliest run that began a commit, per job
+  SELECT r.job_id, min(r.created_at COLLATE "C") AS at
   FROM runs r JOIN events e ON e.run_id = r.id
-  WHERE e.kind IN ('submitting', 'submission', 'submission_requests', 'step_submit')
+  WHERE e.kind = 'submitting'
   GROUP BY r.job_id
-), adj AS (  -- a confirmation resting on the employer's own record of an application AXIOM never began is "already applied"
+), adj AS (  -- success_core.classify_jobs: still being reconciled is not confirmed; a claim with no commit of ours first is someone else's
   SELECT ev.*,
-         CASE WHEN ev.raw_state = 'confirmed' AND ev.grade IN ('weak|existing_application_view', 'weak|final_page_quote', 'weak|dashboard_status',
-                                    'weak|applicant_recorded', 'weak|page_text_rejected')
-                   AND NOT (c.at IS NOT NULL AND c.at <= ev.created_at)
-              THEN 'already_applied' ELSE ev.raw_state END AS st
+         CASE WHEN ev.raw_state <> 'confirmed' THEN ev.raw_state
+              WHEN ev.pending THEN 'submission_unknown'
+              WHEN ev.grade IN ('weak|existing_application_view', 'weak|final_page_quote', 'weak|dashboard_status',
+                                'weak|applicant_recorded', 'weak|page_text_rejected')
+                   AND NOT (c.at IS NOT NULL AND c.at <= ev.created_at COLLATE "C") THEN 'already_applied'
+              ELSE 'confirmed' END AS st
   FROM ev LEFT JOIN commit_at c ON c.job_id = ev.job_id
 ), jobs_scored AS (
   SELECT job_id, max(ats) AS ats,
          bool_or(st = 'confirmed') AS ok, bool_or(st = 'already_applied') AS dup,
-         (array_agg(grade ORDER BY CASE split_part(grade, '|', 1) WHEN 'strong' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, created_at, id)
+         (array_agg(grade ORDER BY CASE split_part(grade, '|', 1) WHEN 'strong' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, created_at COLLATE "C", id COLLATE "C")
             FILTER (WHERE st = 'confirmed'))[1] AS best_grade,
-         (array_agg(st ORDER BY created_at DESC, id DESC))[1] AS last_state,
-         (array_agg(COALESCE(blocker, '') ORDER BY created_at DESC, id DESC))[1] AS last_blocker,
-         (array_agg(interrupted ORDER BY created_at DESC, id DESC))[1] AS last_interrupted,
-         COALESCE((array_agg(st ORDER BY created_at, id) FILTER (WHERE st <> 'dry_run_passed' AND NOT interrupted))[1],
-                  CASE WHEN (array_agg(st ORDER BY created_at DESC, id DESC))[1] <> 'dry_run_passed'
-                       THEN (array_agg(st ORDER BY created_at DESC, id DESC))[1] END) AS first_state,
-         COALESCE((array_agg(created_at ORDER BY created_at, id) FILTER (WHERE st <> 'dry_run_passed' AND NOT interrupted))[1],
-                  max(created_at)) AS started
+         (array_agg(st ORDER BY created_at COLLATE "C" DESC, id COLLATE "C" DESC))[1] AS last_state,
+         (array_agg(COALESCE(blocker, '') ORDER BY created_at COLLATE "C" DESC, id COLLATE "C" DESC))[1] AS last_blocker,
+         (array_agg(interrupted ORDER BY created_at COLLATE "C" DESC, id COLLATE "C" DESC))[1] AS last_interrupted,
+         COALESCE((array_agg(st ORDER BY created_at COLLATE "C", id COLLATE "C") FILTER (WHERE st <> 'dry_run_passed' AND NOT interrupted))[1],
+                  CASE WHEN (array_agg(st ORDER BY created_at COLLATE "C" DESC, id COLLATE "C" DESC))[1] <> 'dry_run_passed'
+                       THEN (array_agg(st ORDER BY created_at COLLATE "C" DESC, id COLLATE "C" DESC))[1] END) AS first_state,
+         COALESCE((array_agg(created_at ORDER BY created_at COLLATE "C", id COLLATE "C") FILTER (WHERE st <> 'dry_run_passed' AND NOT interrupted))[1],
+                  max(created_at COLLATE "C")) AS started
   FROM adj GROUP BY job_id
 ), cohort AS (
   SELECT *, CASE
@@ -85,7 +86,7 @@ WITH ev AS (
       WHEN last_state = 'paused' THEN 'paused_by_owner'
       WHEN last_state = 'waiting_answer' OR last_blocker = 'missing_fact' THEN 'waiting_on_owner'
       ELSE 'failed' END AS outcome
-  FROM jobs_scored WHERE first_state IS NOT NULL AND started >= :'cutoff'
+  FROM jobs_scored WHERE first_state IS NOT NULL AND started COLLATE "C" >= :'cutoff'
 ), n AS (
   SELECT count(*) AS attempted,
          count(*) FILTER (WHERE outcome = 'confirmed') AS confirmed,
@@ -103,12 +104,12 @@ SELECT section, key, value FROM (
   UNION ALL SELECT 'funnel', 'confirmed', confirmed::text, 2 FROM n
   UNION ALL SELECT 'funnel', 'failed', failed::text, 3 FROM n
   UNION ALL SELECT 'funnel', 'eligible', (confirmed + failed)::text, 4 FROM n
-  UNION ALL SELECT 'funnel', 'raw_pct', (floor(1000.0 * confirmed / attempted) / 10)::numeric(6,1)::text, 5 FROM n
-  UNION ALL SELECT 'funnel', 'filtered_pct', (floor(1000.0 * confirmed / (confirmed + failed)) / 10)::numeric(6,1)::text, 6 FROM n
-  UNION ALL SELECT 'funnel', 'first_try_pct', (floor(1000.0 * first_try / (confirmed + failed)) / 10)::numeric(6,1)::text, 7 FROM n
+  UNION ALL SELECT 'funnel', 'raw_pct', (floor(1000.0 * confirmed / NULLIF(attempted, 0)) / 10)::numeric(6,1)::text, 5 FROM n
+  UNION ALL SELECT 'funnel', 'filtered_pct', (floor(1000.0 * confirmed / NULLIF(confirmed + failed, 0)) / 10)::numeric(6,1)::text, 6 FROM n
+  UNION ALL SELECT 'funnel', 'first_try_pct', (floor(1000.0 * first_try / NULLIF(confirmed + failed, 0)) / 10)::numeric(6,1)::text, 7 FROM n
   UNION ALL SELECT 'funnel', 'strict_pct',
-         (floor(1000.0 * confirmed / (confirmed + failed + waiting_on_owner + in_progress)) / 10)::numeric(6,1)::text, 8 FROM n
-  UNION ALL SELECT 'funnel', 'strong_pct', (floor(1000.0 * strong / (confirmed + failed)) / 10)::numeric(6,1)::text, 9 FROM n
+         (floor(1000.0 * confirmed / NULLIF(confirmed + failed + waiting_on_owner + in_progress, 0)) / 10)::numeric(6,1)::text, 8 FROM n
+  UNION ALL SELECT 'funnel', 'strong_pct', (floor(1000.0 * strong / NULLIF(confirmed + failed, 0)) / 10)::numeric(6,1)::text, 9 FROM n
   UNION ALL SELECT 'funnel', 'evidence_strong', strong::text, 10 FROM n
   UNION ALL SELECT 'funnel', 'evidence_medium', medium::text, 11 FROM n
   UNION ALL SELECT 'funnel', 'evidence_weak', weak::text, 12 FROM n
@@ -121,4 +122,4 @@ SELECT section, key, value FROM (
          || COALESCE((floor(1000.0 * count(*) FILTER (WHERE outcome = 'confirmed')
                       / NULLIF(count(*) FILTER (WHERE outcome IN ('confirmed', 'failed')), 0)) / 10)::numeric(6,1)::text, ''), 50
          FROM cohort GROUP BY ats
-) all_rows ORDER BY o, key;
+) all_rows ORDER BY o, key COLLATE "C";
