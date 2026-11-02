@@ -125,10 +125,10 @@ def router(service) -> APIRouter:
             )
         except ValueError:
             raise
-        except Exception as exc:
+        except Exception:
             # imaplib errors carry the server's reply, never the password.
             raise ValueError(
-                f"Gmail IMAP login failed: {type(exc).__name__}. Check the app password and IMAP access."
+                "Gmail didn't accept the login. Check the app password and that IMAP is on."
             ) from None
         return {"connected": True, "folder": "INBOX", "host": "imap.gmail.com"}
 

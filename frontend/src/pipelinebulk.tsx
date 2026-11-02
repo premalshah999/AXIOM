@@ -10,24 +10,26 @@ import { Button } from "./ui/index";
 import { ConfirmButton } from "./worktools";
 
 // Every match on any page, a page at a time from the server. Job id -> its latest run, for every row seen here (Confirm needs the run).
+export type KnownRuns = Record<string, { id?: string; state?: string } | undefined>;
+
 export function useSelectMatching(selection: Selection, rows: JobRow[], filter: Group | Word | "all", query: string, total: number) {
   const { pending, run } = useAction();
-  const [known, setKnown] = useState<Record<string, string | undefined>>({});
+  const [known, setKnown] = useState<KnownRuns>({});
   useEffect(() => {
-    setKnown((k) => ({ ...k, ...Object.fromEntries(rows.map((r) => [r.job.id, r.run?.id])) }));
+    setKnown((k) => ({ ...k, ...Object.fromEntries(rows.map((r) => [r.job.id, r.run ? { id: r.run.id, state: r.run.state } : undefined])) }));
   }, [rows]);
   const selectAll = () =>
     run(
       "select",
       async () => {
-        const found: { job: { id: string }; run?: { id: string } | null }[] = [];
+        const found: { job: { id: string }; run?: { id: string; state: string } | null }[] = [];
         for (let page = 1; found.length < Math.min(total, selection.limit); page += 1) {
           const params = new URLSearchParams({ group: filter, q: query, page: String(page), size: "200" });
-          const part = await api<{ rows: { job: { id: string }; run?: { id: string } | null }[] }>(`/jobs?${params}`);
+          const part = await api<{ rows: { job: { id: string }; run?: { id: string; state: string } | null }[] }>(`/jobs?${params}`);
           found.push(...part.rows);
           if (part.rows.length < 200) break;
         }
-        setKnown((k) => ({ ...k, ...Object.fromEntries(found.map((r) => [r.job.id, r.run?.id])) }));
+        setKnown((k) => ({ ...k, ...Object.fromEntries(found.map((r) => [r.job.id, r.run ? { id: r.run.id, state: r.run.state } : undefined])) }));
         selection.replace(new Set(found.map((r) => r.job.id)));
       },
     );
@@ -38,29 +40,27 @@ export function useSelectMatching(selection: Selection, rows: JobRow[], filter: 
 // every guard still decides each one.
 export function PipelineBulk({
   selection,
-  rows,
-  filter,
   known,
 }: {
-  selection: Selection;
-  rows: JobRow[];
-  filter: Group | Word | "all";
-  known: Record<string, string | undefined>;
+  selection: Pick<Selection, "ids" | "clear">;
+  known: KnownRuns;
 }) {
   const { markJobs, refresh } = useWorkspace();
   const { pending, run } = useAction();
   const n = selection.ids.length;
   const busy = pending !== null;
+  // Each job's own answer decides: only the ones the server took read as changed.
   const each = async (ids: string[], one: (id: string) => Promise<unknown>) => {
-    let ok = 0;
+    const ok: string[] = [];
     for (let i = 0; i < ids.length; i += 4) {
-      const done = await Promise.allSettled(ids.slice(i, i + 4).map(one));
-      ok += done.filter((d) => d.status === "fulfilled").length;
+      const part = ids.slice(i, i + 4);
+      const done = await Promise.allSettled(part.map(one));
+      done.forEach((d, at) => d.status === "fulfilled" && ok.push(part[at]!));
     }
     return ok;
   };
   const finish = (ids: string[], state?: string) => {
-    if (state) markJobs(ids, state);
+    if (state && ids.length) markJobs(ids, state);
     selection.clear();
     void refresh();
   };
@@ -69,26 +69,38 @@ export function PipelineBulk({
       "retry",
       async () => {
         const ids = [...selection.ids];
-        let started = 0;
-        for (let i = 0; i < ids.length; i += 50) {
-          const r = await api<{ results: { outcome: string }[] }>("/jobs/apply-many", "POST", {
-            job_ids: ids.slice(i, i + 50),
-          });
-          started += r.results.filter((x) => x.outcome !== "refused").length;
+        const results: { job_id: string; outcome: string }[] = [];
+        for (let i = 0; i < ids.length; i += 50)
+          results.push(...(await api<{ results: { job_id: string; outcome: string }[] }>("/jobs/apply-many", "POST", { job_ids: ids.slice(i, i + 50) })).results);
+        // "already" is a job already sent or running: nothing started, and only what started reads as started.
+        for (const outcome of ["queued", "waiting", "preparing"] as const) {
+          const started = results.filter((x) => x.outcome === outcome).map((x) => x.job_id);
+          if (started.length) markJobs(started, appliedState(outcome));
         }
-        finish(ids, appliedState("queued"));
-        return started;
+        finish([]);
+        return {
+          started: results.filter((x) => x.outcome === "queued" || x.outcome === "waiting" || x.outcome === "preparing").length,
+          already: results.filter((x) => x.outcome === "already").length,
+          refused: results.filter((x) => x.outcome === "refused").length,
+        };
       },
-      (started) => `Started ${plural(started ?? 0, "job")} again.`,
+      (r) =>
+        r &&
+        [
+          `Started ${plural(r.started, "job")} again.`,
+          r.already ? `${plural(r.already, "was", "were")} already sent or running, so nothing happened to ${r.already === 1 ? "it" : "them"}.` : "",
+          r.refused ? `${plural(r.refused, "job")} couldn't start: open ${r.refused === 1 ? "it" : "them"} to see why.` : "",
+        ]
+          .filter(Boolean)
+          .join(" "),
     );
   const pause = () =>
     run(
       "pause",
       async () => {
-        const ids = [...selection.ids];
-        const ok = await each(ids, (id) => api(`/jobs/${id}/pause`, "POST"));
-        finish(ids, "job:paused");
-        return ok;
+        const ok = await each([...selection.ids], (id) => api(`/jobs/${id}/pause`, "POST"));
+        finish(ok, "job:paused");
+        return ok.length;
       },
       (ok) => `Paused ${plural(ok ?? 0, "job")}.`,
     );
@@ -96,33 +108,33 @@ export function PipelineBulk({
     run(
       "remove",
       async () => {
-        const ids = [...selection.ids];
-        const ok = await each(ids, (id) => api(`/jobs/${id}`, "DELETE"));
-        finish(ids);
-        return ok;
+        const ok = await each([...selection.ids], (id) => api(`/jobs/${id}`, "DELETE"));
+        finish([]);
+        return ok.length;
       },
       (ok) => `Removed ${plural(ok ?? 0, "job")}. Their history is kept.`,
     );
+  const unknown = selection.ids.filter((id) => known[id]?.state === "submission_unknown");
   const verdict = (submitted: boolean) =>
     run(
       submitted ? "confirm" : "unsent",
       async () => {
-        const ids = selection.ids.filter((id) => known[id]);
-        const ok = await each(ids, (id) => reconcileRun(known[id]!, submitted));
-        finish(ids, submitted ? "confirmed" : "needs_review");
-        return ok;
+        // Only an application that may have been sent has a verdict to record; the rest of a selection stays as it is.
+        const ok = await each(unknown, (id) => reconcileRun(known[id]!.id!, submitted));
+        finish(ok, submitted ? "confirmed" : "needs_review");
+        return ok.length;
       },
       (ok) => `${submitted ? "Confirmed" : "Marked not sent:"} ${plural(ok ?? 0, "application")}.`,
     );
   return (
     <>
-      {(filter === "unconfirmed" || rows.some((r) => r.run?.state === "submission_unknown")) && (
+      {unknown.length > 0 && (
         <>
           <Button size="sm" variant="primary" disabled={busy} loading={pending === "confirm"} onClick={() => verdict(true)}>
-            Confirm submitted
+            {unknown.length === n ? "Confirm submitted" : `Confirm ${unknown.length} as submitted`}
           </Button>
           <Button size="sm" disabled={busy} loading={pending === "unsent"} onClick={() => verdict(false)}>
-            Not sent
+            {unknown.length === n ? "Not sent" : `${unknown.length} not sent`}
           </Button>
         </>
       )}

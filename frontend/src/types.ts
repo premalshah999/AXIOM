@@ -70,6 +70,8 @@ export type Review = {
   allow_other?: boolean;
   /** The form takes several answers ("select all that apply"): sent one option per line. */
   multiple?: boolean;
+  /** The answer belongs to one employer ("Why this role?"): never one answer for two employers, however alike the words. */
+  employer_only?: boolean;
   accept?: string;
   /** Where on the form it sits, and the row of the work history it belongs to. */
   context?: {
@@ -78,6 +80,12 @@ export type Review = {
     group?: string;
     caption?: string;
     hint?: string;
+    /** The other boxes beside a tick box: "None of the above" means nothing without them. */
+    peers?: string;
+    /** The list empties until something is typed: the form itself searches. */
+    search_only?: boolean;
+    /** What was read of the list may not be all of it. */
+    options_partial?: boolean;
     history_kind?: string;
     history_identity?: { company?: string; title?: string; school?: string };
   } | null;
@@ -447,12 +455,12 @@ type FailureReport = {
   summary: string;
   likely_cause: string;
   next_steps: string[];
-  source: string;
-  evidence: Record<string, unknown>;
 };
 export type Detail = {
   failure_report?: FailureReport | null;
   run: Run;
+  /** What happened, as a person follows it (vocabulary.activity). `events` is the engine's own diary, which no screen shows. */
+  activity: { id: number; created_at: string; kind: string; message: string }[];
   events: {
     id: number;
     created_at: string;

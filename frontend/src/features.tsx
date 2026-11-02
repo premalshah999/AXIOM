@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { api, ApiError } from "./api";
 import { useWorkspace } from "./context";
 import { useAction, useDraft, usePoll } from "./hooks";
-import { ago, day, plural, stamp } from "./format";
+import { ago, day, plural, stamp, plainError } from "./format";
 import { Pagination, type Paging } from "./pagination";
 import { TailorChoice, type TailorState } from "./tailoring";
 import { Chips, SearchBox } from "./worktools";
@@ -708,9 +708,8 @@ export function JobResume({
             )}
             {a.status === "failed" && (
               <p className="ax-note">
-                {a.error.detail || a.error.code}. This is an internal repair, not
-                a question for you
-                {a.error.retryable ? "; it is retried automatically" : ""}.
+                {plainError(a.error.detail)}
+                {a.error.retryable ? " AXIOM tries again by itself." : ""} Nothing is needed from you.
               </p>
             )}
             {a.status === "kept_master" && (

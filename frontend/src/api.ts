@@ -1,5 +1,6 @@
 // Same-origin JSON client. The session lives in the HttpOnly jp_session cookie;
 // no token is ever read, stored or sent from browser code.
+import { plainError } from "./format";
 
 export class ApiError extends Error {
   constructor(
@@ -22,20 +23,12 @@ const CREDENTIAL_PATHS = new Set(["/login", "/logout", "/account", "/account/log
 
 function detail(data: unknown, status: number): string {
   const value = (data as { detail?: unknown } | null)?.detail;
-  if (typeof value === "string" && value) return value;
-  // FastAPI validation errors: [{loc: [...], msg}]
-  if (Array.isArray(value) && value.length)
-    return value
-      .map((item) => {
-        const loc = Array.isArray(item?.loc)
-          ? item.loc.filter((x: unknown) => x !== "body").join(" › ")
-          : "";
-        return (loc ? loc + ": " : "") + (item?.msg || "Invalid value");
-      })
-      .join("; ");
+  // The server words its refusals (api/middleware.py). This is the last door: nothing only the code's authors can read goes past it.
+  if (typeof value === "string" && value) return plainError(value);
   if (status === 404) return "Not found. It may have been removed.";
+  if (status === 422) return "That wasn't accepted. Check what you entered and try again.";
   if (status >= 500) return "AXIOM hit a server error. Try again shortly.";
-  return "Request failed (" + status + ")";
+  return "That didn't work. Try again.";
 }
 
 export async function api<T = any>(

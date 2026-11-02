@@ -3,7 +3,7 @@
 // Try again is the way past a limit that was misread or does not apply to these jobs: a real one comes back with the next refusal.
 import { api } from "./api";
 import { useWorkspace } from "./context";
-import { plural } from "./format";
+import { plural, plainReason } from "./format";
 import { useAction, usePoll } from "./hooks";
 import "./identity/overview.css";
 import type { Startable } from "./types";
@@ -28,7 +28,7 @@ export function HeldEmployers() {
           <li key={item.key} className="ov-q">
             <MonogramStack names={[item.company || "Employer"]} max={1} />
             <div className="ov-q-text">
-              <p>{item.reason}</p>
+              <p>{plainReason(item.reason)}</p>
               {item.jobs > 0 && <small>{plural(item.jobs, "job")} waiting, nothing opens a browser</small>}
             </div>
             <Button size="sm" variant="ghost" disabled={pending !== null} loading={pending === "release:" + item.key} onClick={() => release(item.key)}>

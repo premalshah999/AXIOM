@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { addManyToQueue, api, frontManyInQueue, moveToFront, removeFromQueue, removeManyFromQueue, type QueueMany } from "./api";
 import { ConfirmQueue, Refused, useSelection } from "./bulk";
 import { useWorkspace } from "./context";
-import { ago, employerOf, jobWords, platformName, plural, seconds, shownFit } from "./format";
+import { ago, employerOf, jobWords, platformName, plural, seconds, shownFit, plainReason } from "./format";
 import { useAction, useNow, usePoll } from "./hooks";
 import { progressFrom, progressOf } from "./identity/stages";
 import { OPEN_JOB_LINK } from "./jobintake";
@@ -472,7 +472,7 @@ function Retrying({ rows }: { rows: QueueRetry[] }) {
       truncate: true,
       cell: (r) => <JobCell {...jobWords(r)} onOpen={() => openJob(r.job_id, r.run_id)} meta={<span>{r.sentence}</span>} />,
     },
-    { key: "why", header: "What stopped it", hideBelow: 600, width: 420, truncate: true, cell: (r) => <Note title={r.reason}>{r.reason || r.sentence}</Note> },
+    { key: "why", header: "What stopped it", hideBelow: 600, width: 420, truncate: true, cell: (r) => <Note title={plainReason(r.reason)}>{plainReason(r.reason) || r.sentence}</Note> },
     { key: "last", header: "Last try", hideBelow: 860, cell: (r) => <time dateTime={r.since}>{ago(r.since, now)}</time> },
     { key: "tries", header: "Tries", num: true, hideBelow: 860, cell: (r) => r.tries },
   ];
@@ -570,8 +570,8 @@ function Held({ q, open, code }: { q: QueuePage; open: boolean; code: string }) 
       (out) => out.message,
     );
   const columns: Column<HeldRow>[] = [
-    { key: "job", header: "Job", width: 440, truncate: true, cell: (r) => <JobCell {...jobWords(r)} onOpen={() => openJob(r.id)} meta={<span>{r.hold.reason}</span>} /> },
-    { key: "why", header: "Why it is held", hideBelow: 600, width: 440, truncate: true, cell: (r) => <Note title={`${r.hold.reason} ${r.hold.next}`}>{r.hold.reason}</Note> },
+    { key: "job", header: "Job", width: 440, truncate: true, cell: (r) => <JobCell {...jobWords(r)} onOpen={() => openJob(r.id)} meta={<span>{plainReason(r.hold.reason)}</span>} /> },
+    { key: "why", header: "Why it is held", hideBelow: 600, width: 440, truncate: true, cell: (r) => <Note title={`${plainReason(r.hold.reason)} ${r.hold.next}`}>{plainReason(r.hold.reason)}</Note> },
     {
       key: "act",
       header: <span className="sr-only">Actions</span>,

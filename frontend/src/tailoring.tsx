@@ -2,6 +2,7 @@
 // is read, edited and approved, for any mode the server has registered (jobpilot/features/resumes/modes.py). The score and the highlights
 // are worked out here on each keystroke from the patterns the server sends, with no request and no model, and the server gets the same number on save (ats.py).
 import { ArrowLeft, RotateCcw } from "lucide-react";
+import { isDeveloperText, plainError } from "./format";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api, ApiError } from "./api";
 import { routeUrl, useWorkspace } from "./context";
@@ -206,7 +207,7 @@ export function TailorChoice({ jobId, known, modes, compact, listed, onChange }:
       if (!listed) setOwn((was) => ({ modes: was?.modes ?? list ?? [], choice: now }));
       onChange?.(now);
     } catch (e) {
-      setOwn((was) => ({ modes: was?.modes ?? list ?? [], choice, error: e instanceof Error ? e.message : "That didn't save." }));
+      setOwn((was) => ({ modes: was?.modes ?? list ?? [], choice, error: e instanceof Error ? plainError(e.message) : "That didn't save." }));
     } finally {
       setBusy(false);
     }
@@ -316,7 +317,7 @@ export function TailorView() {
       setView(await api<View>(path(jobId)));
       setError("");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "This job couldn't be opened.");
+      setError(e instanceof Error ? plainError(e.message) : "This job couldn't be opened.");
     }
   };
   useEffect(() => {
@@ -400,7 +401,7 @@ function ModePicker({ view, onChanged }: { view: View; onChanged: () => void }) 
 function Failed({ view, onChanged }: { view: View; onChanged: () => void }) {
   const { go } = useWorkspace();
   const { pending, run } = useAction();
-  const detail = view.rule_problems[0]?.message || view.choice?.error?.detail || view.choice?.error?.code || "Something went wrong.";
+  const detail = view.rule_problems[0]?.message || (view.choice?.error?.detail && !isDeveloperText(view.choice.error.detail) ? view.choice.error.detail : "") || "Something went wrong.";
   return (
     <div className="tl-failed" role="alert">
       <p>
@@ -633,7 +634,7 @@ function Review({ view, onView, onChanged }: { view: View; onView: (v: View) => 
     } catch (e) {
       const body = e instanceof ApiError ? (e.data as { problems?: Problem[] } | undefined) : undefined;
       setProblems(body?.problems ?? []);
-      setMessage(e instanceof Error ? e.message : "That couldn't be saved.");
+      setMessage(e instanceof Error ? plainError(e.message) : "That couldn't be saved.");
       return null;
     }
   };
@@ -656,7 +657,7 @@ function Review({ view, onView, onChanged }: { view: View; onView: (v: View) => 
         setMessage(done.message);
         onChanged();
       } catch (e) {
-        setMessage(e instanceof Error ? e.message : "That couldn't be approved.");
+        setMessage(e instanceof Error ? plainError(e.message) : "That couldn't be approved.");
       }
     });
   const approved = view.choice?.state === "approved" && view.choice.approved_artifact_id === view.artifact!.id;

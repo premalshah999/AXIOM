@@ -3,6 +3,7 @@
 // actions and a two-step confirm button. Tokens only; the CSS is styles/components.css.
 import { MoreHorizontal, Search } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { plainError } from "./format";
 import { stateInfo, type Tone } from "./model";
 import { Button, Monogram, Pill, Popover, type PillTone } from "./ui/index";
 
@@ -349,7 +350,7 @@ export function LoadError({ error, retry }: { error: Error; retry: () => unknown
         </Button>
       }
     >
-      {error.message}
+      {plainError(error.message)}
     </Notice>
   );
 }

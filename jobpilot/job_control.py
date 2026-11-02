@@ -67,7 +67,7 @@ async def manage(service, job_id, action, *, controller_policy=None, reopen_clos
                 "This posting is closed and was not retried. Reopen it deliberately to apply again"
             )
         if action == "resume" and committed:
-            raise ValueError("Submission has started or has evidence; this job cannot be reapplied")
+            raise ValueError("This application was sent or may have been, so it isn't sent again. Check your email, or confirm it from the job.")
         previous_status = (control.value.get("previous_status") if control else None) or job.status
         value = {
             "state": {"pause": "paused", "delete": "deleted", "resume": "active"}[action],

@@ -8,7 +8,7 @@ import { useWorkspace } from "./context";
 import { useAction } from "./hooks";
 import { appliedState } from "./model";
 import type { ApplyManyResult, ApplyOutcome } from "./types";
-import { plural, shortId } from "./format";
+import { plainReason, plural, shortId } from "./format";
 import { Button, Dialog, Panel } from "./ui/index";
 import { StatusPill } from "./worktools";
 
@@ -153,7 +153,7 @@ export function ApplyOutcomes({
         <button type="button" className="ax-link" onClick={() => openJob(r.job_id)}>
           {r.company || r.title ? `${r.company || "Employer"} · ${r.title || ""}` : shortId(r.job_id)}
         </button>
-        {r.message && <small>{r.message}</small>}
+        {r.message && <small>{plainReason(r.message)}</small>}
       </span>
       <StatusPill
         state={r.outcome === "refused" ? "failed" : r.outcome === "already" ? r.state : appliedState(r.outcome)}
@@ -254,7 +254,7 @@ export function Refused({ refused, onClose }: { refused: QueueMany["refused"]; o
         <button type="button" className="ax-link" onClick={() => openJob(r.job_id)}>
           {r.company || r.title ? `${r.company || "Employer"} · ${r.title || ""}` : shortId(r.job_id)}
         </button>
-        <small>{r.reason}</small>
+        <small>{plainReason(r.reason)}</small>
       </span>
     </li>
   );

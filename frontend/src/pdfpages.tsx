@@ -2,6 +2,7 @@
 // new tab goes nowhere and the server's "attachment" answer would only download. The library loads when the first one is shown. Each
 // update renders off-screen and swaps in when complete, so the page never flickers while typing.
 import { useEffect, useRef, useState } from "react";
+import { plainError } from "./format";
 import { FileText, Maximize2, Minus, Plus, StretchHorizontal } from "lucide-react";
 import { signedOut } from "./api";
 import { IconButton } from "./ui/index";
@@ -47,7 +48,7 @@ export function usePdf(url: string | null) {
     let current = true;
     readPdf(url).then(
       (data) => current && setState({ url, data, error: "" }),
-      (e: Error) => current && setState({ url, data: null, error: e.message }),
+      (e: Error) => current && setState({ url, data: null, error: plainError(e.message) }),
     );
     return () => {
       current = false;

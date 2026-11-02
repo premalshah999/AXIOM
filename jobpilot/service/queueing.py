@@ -342,7 +342,7 @@ class QueueingMixin:
                 )
             if job.status == "archived":
                 raise QueueBlocked(
-                    "This application is archived and is outside the active pipeline", code="archived"
+                    "This job was removed. Restore it to apply again.", code="archived"
                 )
             from ..ats import canonicalize, detect, icims_requisition_alias, identity_variants, url_identity
 
@@ -366,7 +366,7 @@ class QueueingMixin:
                 s.get(Setting, guard_key(i)) for u in [*own_urls, *(url for _, url in twins)] for i in identity_variants(u)
             ):
                 raise QueueBlocked(
-                    "An archived application protects this job from duplicate submission.",
+                    "This job was removed after an application may have been sent, so it isn't sent again.",
                     outcome="protected",
                     code="archived_submission",
                 )
@@ -434,7 +434,7 @@ class QueueingMixin:
                     None,
                 )
                 raise QueueBlocked(
-                    "This job is submitted or has an uncertain submission. Reconcile it first."
+                    "This application was sent or may have been, so it isn't sent again. Check your email, or confirm it from the job."
                     + (f" Earlier application: {described(s, holder.job_id)}." if holder else ""),
                     outcome="protected",
                     code="submitted_or_uncertain",
@@ -714,7 +714,7 @@ class QueueingMixin:
                     "engine_version": engine_version(),
                     # Take over's rebuilding run: the engine keeps its tab open for the owner whatever the result.
                     **({"steer": True} if mode == "dry_run" and steer_opening(s, job.id) else {}),
-                    **({"owner_hands": True} if mode == "submit" and steer_hands(s, job.id) else {}),
+                    **({"owner_hands": handed} if mode == "submit" and (handed := steer_hands(s, job.id)) else {}),
                     "model_version": self.config.llm_provider + ":" + self.config.llm_model,
                     "runner_tier": job_tier(self.db, job.id),
                     "profile_version": profile_version(packet_profile),
