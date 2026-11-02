@@ -96,13 +96,16 @@ class Style(BaseModel):
 
 # Sizes in bp, the unit a PDF reports, so "9 pt" reads 9.00 in the file and not TeX's 8.97. validate.check_typography reads them back.
 TAILORED_TYPE = {"name": 16.0, "section": 10.5, "sub": 10.0, "bullet": 9.0}
+TAILORED_MARGIN = 0.25  # Inches. The owner: almost no margins, tight spacing, no headers or footers.
 
 
 def tailored_style(base: "Style | None" = None) -> "Style":
     """A tailored resume keeps the font and layout the applicant chose; only its type sizes are fixed."""
     base = base or Style()
     return base.model_copy(
-        update={"fixed_type": True, "font_size": TAILORED_TYPE["bullet"], "name_size": TAILORED_TYPE["name"], "line_spacing": min(base.line_spacing, 1.0)}
+        update={"fixed_type": True, "font_size": TAILORED_TYPE["bullet"], "name_size": TAILORED_TYPE["name"], "line_spacing": min(base.line_spacing, 1.0),
+                "margin_top": TAILORED_MARGIN, "margin_bottom": TAILORED_MARGIN, "margin_left": TAILORED_MARGIN, "margin_right": TAILORED_MARGIN,
+                "section_gap": min(base.section_gap, 3), "entry_gap": min(base.entry_gap, 1), "bullet_gap": 0}
     )
 
 
